@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Touch Wind — Installation | 触风</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #06080f; }
+  canvas { display: block; touch-action: none; }
+  #video { display: none; }
+  #hint {
+    position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+    font-family: Georgia, serif; color: rgba(225,232,255,0.8);
+    font-size: 14px; letter-spacing: 2px; text-align: center;
+    pointer-events: none; transition: opacity 2s ease;
+  }
+  #controls { position: fixed; top: 20px; right: 20px; display: flex; gap: 10px; font-family: Georgia, serif; z-index: 10; }
+  .btn {
+    background: rgba(20,28,52,0.6); color: #9db8ff;
+    border: 1px solid rgba(155,175,220,0.3); border-radius: 20px;
+    padding: 8px 18px; font-size: 13px; letter-spacing: 1px;
+    cursor: pointer; backdrop-filter: blur(6px); transition: all 0.3s;
+  }
+  .btn:hover { border-color: rgba(155,175,220,0.7); }
+  .btn.on { background: rgba(90,120,220,0.35); color: #dfe6f5; }
+  #status {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    font-family: Georgia, serif; color: rgba(150,165,200,0.75);
+    font-size: 12px; letter-spacing: 1.5px; pointer-events: none; text-align: center;
+  }
+</style>
+</head>
+<body>
+<div id="hint"></div>
+<div id="controls">
+  <button class="btn" id="soundBtn">🔊 sound off</button>
+  <button class="btn" id="handBtn">📷 hand off</button>
+</div>
+<div id="status"></div>
+<video id="video" playsinline></video>
+
+<script>
+/* ============================================================
+   TOUCH WIND — INSTALLATION PAGE  |  触风 · 装置版
+   One page, four materials, chosen by the URL:
+     ?m=fire   风火山林   full-screen blaze, roar + crackling embers
+     ?m=grass  草浪       rooted blades, rustle + evening crickets
+     ?m=cloud  呼吸的云   breathing icy volume, airy pad that inhales
+     ?m=wave   流光之海   cold nebula fluid, wash + storm-wave crashes
+   (old ?m=silk and ?m=smoke links redirect to fire and cloud)
+   Camera hand tracking (two hands, pinch = gust) with no preview
+   window: the artwork itself is the only image on screen.
+   ============================================================ */
+const RAW = (new URLSearchParams(location.search).get('m') || 'fire').toLowerCase();
+const M = ({ silk: 'fire', smoke: 'cloud' })[RAW] || RAW;   // old links keep working
+
+const HINTS = {
+  fire:  ['stir the fire · 拨动火焰', 'pinch either hand to burst the blaze · 捏合手指，炸开一团烈焰'],
+  grass: ['sweep across the meadow · 拂过草浪', 'pinch either hand for a gust · 捏合手指，压弯一片草'],
+  cloud: ['move through the breathing cloud · 穿过呼吸的云', 'pinch either hand to bloom the mass · 捏合手指，涌起一团云'],
+  wave:  ['stir the sea of light · 搅动流光之海', 'pinch either hand to roll a storm wave · 捏合手指，狂风卷浪'],
+};
+const CFG = {
+  fire:  { bg: [5, 2, 2],    fade: 13, N: 3800 },
+  grass: { bg: [7, 14, 9],   fade: 90, N: 4200 },
+  cloud: { bg: [5, 9, 18],   fade: 7,  N: 3200 },
+  wave:  { bg: [3, 6, 14],   fade: 16, N: 5200 },
+};
+if (!CFG[M]) location.search = '?m=fire';
+document.getElementById('hint').innerHTML =
+  HINTS[M][0] + '<br><span style="font-size:11px;opacity:0.6">' + HINTS[M][1] +
+  ' · enable sound and camera above</span>';
+document.title = 'Touch Wind · ' + M.charAt(0).toUpperCase() + M.slice(1) + ' | 触风';
+
+let particles = [], winds = [], gusts = [], mousePrev;
+let windEnergy = 0, hintFaded = false;
+let handStates = [null, null];
+
+/* ==================== PARTICLES ==================== */
+class P {
+  constructor() {
+    this.pos = createVector(random(width), random(height));
+    this.home = this.pos.copy();
+    this.vel = p5.Vector.random2D().mult(0.5);
+    this.size = constrain(abs(randomGaussian(1.2, 0.9)), 0.4, 4.5);
+    this.hue = random();
+    this.life = 160 + random(220);      // flame tongues live and die
+    this.age = random(this.life);
+  }
+  push(k, sigma, spread) {
+    for (const w of winds) {
+      if (w.vel.mag() > 0.5) {
+        const d = dist(this.pos.x, this.pos.y, w.pos.x, w.pos.y);
+        const sg = w.sigma || sigma;
+        const s = exp(-(d * d) / (2 * sg * sg));
+        if (s > 0.01) {
+          const f = w.vel.copy().mult(k * s);
+          f.rotate(randomGaussian(0, spread));
+          f.mult(abs(randomGaussian(1, 0.5)));
+          this.vel.add(f);
+        }
+      }
+    }
+  }
+  part(k, sigma) {
+    for (const w of winds) {
+      if (w.vel.mag() > 0.5) {
+        const d = dist(this.pos.x, this.pos.y, w.pos.x, w.pos.y);
+        const sg = w.sigma || sigma;
+        const s = exp(-(d * d) / (2 * sg * sg));
+        if (s > 0.02) {
+          const away = p5.Vector.sub(this.pos, w.pos).normalize();
+          this.vel.add(away.mult(k * s * min(w.vel.mag() * 0.12, 2.6)));
+        }
+      }
+    }
+  }
+  update() {
+    if (M === 'fire') {
+      /* flame anatomy: every tongue is born at the burning bed, rises
+         on its own heat, cools, dies and is reborn below — the fire
+         is a fountain, not a texture */
+      this.age++;
+      if (this.age > this.life || this.pos.y < -12) {
+        this.pos.set(random(width), height + random(60));
+        this.vel.set(randomGaussian(0, 0.4), -2.2 - random(2.2));
+        this.age = 0; this.life = 160 + random(220);
+      }
+      const eh = 1 - this.age / this.life;             // remaining heat
+      const a = noise(this.pos.x * 0.003, this.pos.y * 0.003, frameCount * 0.006) * TWO_PI * 2;
+      this.vel.add(cos(a) * 0.12, sin(a) * 0.05 - 0.20 * eh);
+      this.push(0.26, 40, 0.5);
+      this.vel.mult(0.92); this.vel.limit(10);
+      /* fire only ever rises: no tongue may travel downward */
+      if (this.vel.y > 0.35) this.vel.y = 0.35;
+    } else if (M === 'grass') {
+      const disp = p5.Vector.sub(this.pos, this.home);
+      this.vel.add(disp.mult(-0.035));
+      const a = noise(this.home.x * 0.002, this.home.y * 0.002, frameCount * 0.005) * TWO_PI;
+      this.vel.add(cos(a) * 0.14, sin(a) * 0.04);
+      /* a WIND WAKE, not a rolling ball: influence is a stripe
+         stretched along the wind and narrow across it, and every
+         blade bends strictly downwind */
+      for (const w of winds) {
+        const wm = w.vel.mag();
+        if (wm < 0.5) continue;
+        const ux = w.vel.x / wm, uy = w.vel.y / wm;
+        const ddx = this.pos.x - w.pos.x, ddy = this.pos.y - w.pos.y;
+        const along = ddx * ux + ddy * uy;
+        const cross = -ddx * uy + ddy * ux;
+        const sW = exp(-(along * along) / (2 * 150 * 150)
+                       - (cross * cross) / (2 * 45 * 45));
+        if (sW > 0.01) {
+          const f = 0.16 * wm * sW * abs(randomGaussian(1, 0.25));
+          this.vel.add(ux * f, uy * f);
+        }
+      }
+      this.vel.mult(0.86); this.vel.limit(9);
+    } else if (M === 'cloud') {
+      /* a breathing volume: the mass swells and collapses on its own
+         slow cycle, like a blue cloud that inhales and exhales */
+      const a = noise(this.pos.x * 0.0016, this.pos.y * 0.0016, frameCount * 0.0035) * TWO_PI * 2;
+      this.vel.add(cos(a) * 0.05, sin(a) * 0.05);
+      const br = sin(frameCount * 0.012);
+      const ddx = width / 2 - this.pos.x, ddy = height / 2 - this.pos.y;
+      const dd = Math.hypot(ddx, ddy) + 1;
+      this.vel.add(ddx / dd * br * 0.06, ddy / dd * br * 0.06);
+      this.part(2.6, 45);
+      this.vel.mult(0.94); this.vel.limit(7);
+    } else if (M === 'wave') {
+      /* breathing volumetric sea: every particle belongs to a plush
+         mass whose whole body inhales and exhales about the centre,
+         growing, collapsing and regenerating; fine turbulence combs
+         the surface into fur-like strands */
+      const br = 1 + 0.16 * sin(frameCount * 0.011);
+      const hx = width / 2 + (this.home.x - width / 2) * br;
+      const hy = height / 2 + (this.home.y - height / 2) * br;
+      this.vel.add((hx - this.pos.x) * 0.012, (hy - this.pos.y) * 0.012);
+      const a = noise(this.pos.x * 0.004, this.pos.y * 0.004, frameCount * 0.008) * TWO_PI * 2;
+      this.vel.add(cos(a) * 0.22, sin(a) * 0.22);
+      this.push(0.30, 85, 0.3);
+      this.vel.mult(0.90); this.vel.limit(9);
+    }
+    this.pos.add(this.vel);
+    if (M !== 'grass') {
+      if (this.pos.x < -10) this.pos.x = width + 10;
+      if (this.pos.x > width + 10) this.pos.x = -10;
+      if (this.pos.y < -10) this.pos.y = height + 10;
+      if (this.pos.y > height + 10) this.pos.y = -10;
+    }
+  }
+  show() {
+    const sp = this.vel.mag();
+    if (M === 'fire') {
+      /* crimson tendrils: bright orange-white while young and hot,
+         darkening to deep red as the tongue cools and dies */
+      const eh = constrain(1 - this.age / this.life, 0, 1);
+      const t = constrain(sp / 6, 0, 1);
+      const g = constrain(0.22 + 0.68 * eh + 0.30 * t, 0, 1);
+      stroke(120 + 135 * g, 15 + 205 * g * g, 5 + 70 * g * g * g, 45 + 195 * eh);
+      strokeWeight(this.size * 0.7);
+      line(this.pos.x - this.vel.x * 1.6, this.pos.y - this.vel.y * 1.6,
+           this.pos.x, this.pos.y);
+    } else if (M === 'grass') {
+      /* vivid pop palette (after Kusama's colour, not her dots):
+         saturated bright greens with scattered golden blades —
+         everything stays a blade, drawn thicker */
+      const bx = this.pos.x - this.home.x, by = this.pos.y - this.home.y;
+      const g = 0.5 + 0.5 * this.hue;
+      const glow = constrain(sp / 4, 0, 1);
+      const tipx = this.home.x + bx * 1.8,
+            tipy = this.home.y - 9 - 7 * this.size + by * 1.4;
+      if (this.hue > 0.90) stroke(255, 214, 80, 245);
+      else stroke(70 + 105 * g + 85 * glow, 180 + 70 * g + 40 * glow, 60 + 42 * g, 245);
+      strokeWeight(2.2);
+      line(this.home.x, this.home.y, tipx, tipy);
+    } else if (M === 'cloud') {
+      /* icy blue volume, soft-edged, read as density not as dots */
+      const t = constrain(sp / 4, 0, 1);
+      const h = noise(this.pos.x * 0.0012, this.pos.y * 0.0012);
+      stroke(115 + 65 * h + 45 * t, 165 + 55 * h + 35 * t, 225 + 25 * h, 10 + 16 * t);
+      strokeWeight(7 + 6 * this.size);
+      point(this.pos.x, this.pos.y);
+    } else if (M === 'wave') {
+      /* plush fur strands: turquoise crests, violet crevices,
+         whites where the mass moves fast */
+      const t = constrain(sp / 5, 0, 1);
+      const h = noise(this.pos.x * 0.0016, this.pos.y * 0.0016 + 9);
+      stroke(lerp(96, 150, h) + 70 * t, lerp(215, 130, h) + 50 * t, lerp(235, 240, h), 75 + 150 * t);
+      strokeWeight(this.size * 0.8);
+      line(this.pos.x - this.vel.x * 1.8, this.pos.y - this.vel.y * 1.8,
+           this.pos.x, this.pos.y);
+    }
+  }
+}
+
+function veil() {
+  const c = CFG[M];
+  noStroke(); fill(c.bg[0], c.bg[1], c.bg[2], c.fade); rect(0, 0, width, height);
+}
+
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  const c = CFG[M];
+  background(c.bg[0], c.bg[1], c.bg[2]);
+  mousePrev = createVector(width / 2, height / 2);
+  for (let i = 0; i < c.N; i++) particles.push(new P());
+  winds = [];
+  for (let i = 0; i < 150; i++) {            // pre-warm: no black opening
+    veil();
+    for (const pt of particles) { pt.update(); pt.show(); }
+  }
+}
+
+function draw() {
+  veil();
+  winds = [];
+  let anyHand = false;
+  for (const h of handStates) {
+    if (h && frameCount - h.seen < 15) {
+      winds.push({ pos: h.pos.copy(), vel: p5.Vector.sub(h.pos, h.prev) });
+      h.prev = h.pos.copy();
+      anyHand = true;
+    }
+  }
+  if (!anyHand) {
+    const m = createVector(mouseX, mouseY);
+    winds.push({ pos: m.copy(), vel: p5.Vector.sub(m, mousePrev) });
+    mousePrev = m;
+  }
+
+  /* travelling gusts (silk, grass, wave) — smoke bursts radially */
+  for (let i = gusts.length - 1; i >= 0; i--) {
+    const g = gusts[i];
+    const k = pow(1 - g.age / g.life, 1.4);
+    const v = p5.Vector.fromAngle(g.dir).mult(26 * k + 2);
+    winds.push({ pos: g.pos.copy(), vel: v, sigma: 210 });
+    g.pos.add(v.copy().mult(0.36));
+    g.dir += g.curve;
+    if (++g.age > g.life) gusts.splice(i, 1);
+  }
+
+  for (const pt of particles) { pt.update(); pt.show(); }
+
+  /* no ring overlay: the tracked hand shows only through the matter it moves */
+
+  let maxV = 0;
+  for (const w of winds) maxV = max(maxV, w.vel.mag());
+  windEnergy = lerp(windEnergy, constrain(maxV / 40, 0, 1), 0.06);
+  updateSound();
+
+  if (!hintFaded && frameCount > 480) {
+    document.getElementById('hint').style.opacity = 0;
+    hintFaded = true;
+  }
+}
+
+function burst(x, y, dirAngle) {
+  if (M === 'cloud') {
+    /* the mass blooms outward, then the breath draws it back */
+    for (const pt of particles) {
+      const d = dist(pt.pos.x, pt.pos.y, x, y);
+      if (d < 320) {
+        const dir = p5.Vector.sub(pt.pos, createVector(x, y)).normalize();
+        dir.rotate(randomGaussian(0, 0.3));
+        pt.vel.add(dir.mult(abs(randomGaussian(7, 3)) * exp(-d / 210)));
+      }
+    }
+  } else if (M === 'fire') {
+    /* an explosion of sparks: radial burst with an upward lick */
+    for (const pt of particles) {
+      const d = dist(pt.pos.x, pt.pos.y, x, y);
+      if (d < 380) {
+        const dir = p5.Vector.sub(pt.pos, createVector(x, y)).normalize();
+        dir.rotate(randomGaussian(0, 0.45));
+        const f = abs(randomGaussian(11, 4)) * exp(-d / 240);
+        pt.vel.add(dir.x * f, dir.y * f - abs(randomGaussian(2.5, 1)));
+      }
+    }
+  } else if (M === 'wave') {
+    /* 狂风卷浪: a violent rolling gust that curls across the sea */
+    if (dirAngle === undefined) dirAngle = random(TWO_PI);
+    gusts.push({ pos: createVector(x, y), dir: dirAngle + randomGaussian(0, 0.15),
+                 curve: randomGaussian(0.02, 0.02), age: 0, life: 65 });
+    for (const pt of particles) {
+      const d = dist(pt.pos.x, pt.pos.y, x, y);
+      if (d < 300) {
+        const dir = p5.Vector.sub(pt.pos, createVector(x, y)).normalize();
+        dir.rotate(randomGaussian(0, 0.4));
+        pt.vel.add(dir.mult(abs(randomGaussian(8, 3)) * exp(-d / 220)));
+      }
+    }
+  } else {
+    if (dirAngle === undefined) dirAngle = random(TWO_PI);
+    gusts.push({ pos: createVector(x, y), dir: dirAngle + randomGaussian(0, 0.15),
+                 curve: randomGaussian(0, 0.014), age: 0, life: 55 });
+  }
+  gustSound();
+}
+
+function mousePressed() {
+  if (mouseY <= 70) return;
+  const v = createVector(movedX, movedY);
+  burst(mouseX, mouseY, v.mag() > 2 ? v.heading() : undefined);
+}
+function touchStarted()  { if (mouseY > 70) burst(mouseX, mouseY); return false; }
+function touchMoved()    { return false; }
+function windowResized() { resizeCanvas(windowWidth, windowHeight); }
+
+/* ==================== SOUND — one voice per material ==================== */
+let audioCtx = null, soundOn = false;
+let g1 = null, f1 = null, g2 = null, f2 = null;   // two noise layers
+let padGain = null, subOsc = null, subGain = null, extraTimer = null;
+
+function noiseSrc() {
+  const len = audioCtx.sampleRate * 2;
+  const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  const s = audioCtx.createBufferSource();
+  s.buffer = buf; s.loop = true; s.start();
+  return s;
+}
+
+function buildAudio() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  /* layer 1: the gesture voice */
+  f1 = audioCtx.createBiquadFilter(); g1 = audioCtx.createGain(); g1.gain.value = 0;
+  noiseSrc().connect(f1).connect(g1).connect(audioCtx.destination);
+  /* layer 2: the resting bed */
+  f2 = audioCtx.createBiquadFilter(); g2 = audioCtx.createGain(); g2.gain.value = 0;
+  noiseSrc().connect(f2).connect(g2).connect(audioCtx.destination);
+
+  if (M === 'fire') {
+    f1.type = 'lowpass'; f1.frequency.value = 500;                        // the roar
+    f2.type = 'bandpass'; f2.frequency.value = 2400; f2.Q.value = 0.5;    // ember hiss
+    scheduleCrackle();                                                    // the crackling
+  } else if (M === 'grass') {
+    f1.type = 'bandpass'; f1.frequency.value = 3200; f1.Q.value = 0.7;   // dry rustle
+    f2.type = 'lowpass'; f2.frequency.value = 450;                        // night air
+    scheduleCricket();
+  } else if (M === 'cloud') {
+    f1.type = 'lowpass'; f1.frequency.value = 700;                        // airy motion
+    f2.type = 'lowpass'; f2.frequency.value = 350;                        // the breath bed
+    /* a soft icy pad breathing with the cloud */
+    padGain = audioCtx.createGain(); padGain.gain.value = 0;
+    const lp = audioCtx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
+    for (const fr of [220.0, 330.0]) {
+      for (const det of [-5, 5]) {
+        const o = audioCtx.createOscillator();
+        o.type = 'sine'; o.frequency.value = fr; o.detune.value = det;
+        o.connect(lp); o.start();
+      }
+    }
+    lp.connect(padGain).connect(audioCtx.destination);
+  } else if (M === 'wave') {
+    f1.type = 'lowpass'; f1.frequency.value = 700;                        // surf hiss
+    f2.type = 'lowpass'; f2.frequency.value = 320;                        // the wash
+  }
+}
+
+function updateSound() {
+  if (!soundOn || !audioCtx) return;
+  const t = audioCtx.currentTime;
+  const wob = noise(frameCount * 0.008) * 0.5 + 0.75;
+  const e = windEnergy * wob;
+  const calm = constrain(1 - windEnergy * 6, 0, 1);
+
+  if (M === 'fire') {
+    /* the fire roars on its own and swells with the gesture */
+    const flicker = noise(frameCount * 0.02 + 7) * 0.5 + 0.6;
+    g1.gain.setTargetAtTime((0.045 + e * 0.28) * flicker, t, 0.07);
+    f1.frequency.setTargetAtTime(300 + e * 900 + flicker * 150, t, 0.1);
+    g2.gain.setTargetAtTime(0.010 + e * 0.10, t, 0.1);
+  } else if (M === 'grass') {
+    g1.gain.setTargetAtTime(0.012 + e * 0.26, t, 0.07);
+    f1.frequency.setTargetAtTime(2400 + e * 2600, t, 0.1);
+    g2.gain.setTargetAtTime(0.020 * (0.5 + 0.5 * calm) * wob, t, 0.3);
+  } else if (M === 'cloud') {
+    /* the sound inhales and exhales with the visual breath cycle */
+    const breathe = (sin(frameCount * 0.012) + 1) / 2;
+    g1.gain.setTargetAtTime(0.012 + e * 0.18, t, 0.12);
+    f1.frequency.setTargetAtTime(450 + e * 900, t, 0.15);
+    g2.gain.setTargetAtTime(0.020 + 0.030 * breathe, t, 0.35);
+    f2.frequency.setTargetAtTime(240 + breathe * 260, t, 0.4);
+    padGain.gain.setTargetAtTime(0.006 + 0.016 * breathe * (0.4 + 0.6 * calm), t, 0.5);
+  } else if (M === 'wave') {
+    /* the sea swells on its own ~9 second cycle, even untouched */
+    const swell = (sin(frameCount * 0.0116) + 1) / 2;
+    g2.gain.setTargetAtTime(0.045 + swell * 0.075 + e * 0.06, t, 0.3);
+    f2.frequency.setTargetAtTime(260 + swell * 340, t, 0.3);
+    g1.gain.setTargetAtTime(0.01 + e * 0.24 + swell * 0.02, t, 0.1);
+    f1.frequency.setTargetAtTime(600 + e * 1200, t, 0.12);
+  }
+}
+
+function gustSound() {
+  if (!soundOn || !audioCtx) return;
+  const t = audioCtx.currentTime;
+  if (M === 'fire') {
+    /* whoomp: a deep burst of flame plus a shower of crackles */
+    g1.gain.cancelScheduledValues(t);
+    g1.gain.setTargetAtTime(0.45, t, 0.02);
+    g1.gain.setTargetAtTime(0.06, t + 0.3, 0.35);
+    f1.frequency.cancelScheduledValues(t);
+    f1.frequency.setTargetAtTime(1400, t, 0.03);
+    f1.frequency.setTargetAtTime(350, t + 0.3, 0.4);
+    for (let i = 0; i < 10; i++) crackleTick(t + Math.random() * 0.5, 0.9);
+  } else if (M === 'grass') {
+    g1.gain.cancelScheduledValues(t);
+    g1.gain.setTargetAtTime(0.34, t, 0.02);
+    g1.gain.setTargetAtTime(0.03, t + 0.2, 0.25);
+  } else if (M === 'cloud') {
+    /* a slow deep billow */
+    g2.gain.cancelScheduledValues(t);
+    g2.gain.setTargetAtTime(0.28, t, 0.05);
+    g2.gain.setTargetAtTime(0.04, t + 0.35, 0.5);
+    f2.frequency.cancelScheduledValues(t);
+    f2.frequency.setTargetAtTime(650, t, 0.08);
+    f2.frequency.setTargetAtTime(280, t + 0.4, 0.5);
+  } else if (M === 'wave') {
+    /* a breaking crest: sharp hiss + low thump, long tail */
+    g1.gain.cancelScheduledValues(t);
+    g1.gain.setTargetAtTime(0.45, t, 0.03);
+    g1.gain.setTargetAtTime(0.04, t + 0.5, 0.6);
+    f1.frequency.cancelScheduledValues(t);
+    f1.frequency.setTargetAtTime(2600, t, 0.04);
+    f1.frequency.setTargetAtTime(800, t + 0.5, 0.6);
+    g2.gain.cancelScheduledValues(t);
+    g2.gain.setTargetAtTime(0.22, t, 0.05);
+    g2.gain.setTargetAtTime(0.06, t + 0.4, 0.5);
+  }
+}
+
+/* fire crackle: tiny bright noise ticks at irregular intervals */
+function crackleTick(at, loud) {
+  const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+  const hp = audioCtx.createBiquadFilter();
+  hp.type = 'highpass'; hp.frequency.value = 1800 + Math.random() * 2500;
+  o.type = 'sawtooth'; o.frequency.value = 900 + Math.random() * 2200;
+  const amp = (0.006 + Math.random() * 0.022) * (loud || 1);
+  g.gain.setValueAtTime(0, at);
+  g.gain.linearRampToValueAtTime(amp, at + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + 0.03 + Math.random() * 0.04);
+  o.connect(hp).connect(g).connect(audioCtx.destination);
+  o.start(at); o.stop(at + 0.09);
+}
+function scheduleCrackle() {
+  extraTimer = setTimeout(() => {
+    if (soundOn && audioCtx) {
+      const e = windEnergy;
+      if (Math.random() < 0.55 + e * 2) crackleTick(audioCtx.currentTime, 0.6 + e * 1.6);
+    }
+    scheduleCrackle();
+  }, 45 + Math.random() * 140);
+}
+
+/* evening crickets for the meadow, only in calm air */
+function cricketChirp() {
+  const t0 = audioCtx.currentTime;
+  const f = 4100 + Math.random() * 500;
+  for (let i = 0; i < 4 + Math.floor(Math.random() * 3); i++) {
+    const t = t0 + i * 0.055;
+    const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+    o.type = 'sine'; o.frequency.value = f;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.012, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t); o.stop(t + 0.06);
+  }
+}
+function scheduleCricket() {
+  extraTimer = setTimeout(() => {
+    if (soundOn && audioCtx && windEnergy < 0.12) cricketChirp();
+    scheduleCricket();
+  }, 1400 + Math.random() * 3800);
+}
+
+document.getElementById('soundBtn').addEventListener('click', function () {
+  if (!audioCtx) buildAudio();
+  soundOn = !soundOn;
+  if (soundOn) audioCtx.resume();
+  else {
+    g1.gain.value = 0; g2.gain.value = 0;
+    if (padGain) padGain.gain.value = 0;
+    if (subGain) subGain.gain.value = 0;
+  }
+  this.textContent = soundOn ? '🔊 sound on' : '🔊 sound off';
+  this.classList.toggle('on', soundOn);
+});
+
+/* ==================== HAND TRACKING (no preview window) ==================== */
+let hands = null, camera = null, handOn = false;
+const statusEl = document.getElementById('status');
+
+function onHandResults(results) {
+  if (!results.multiHandLandmarks) return;
+  results.multiHandLandmarks.forEach((lm, i) => {
+    if (i > 1) return;
+    const tx = (1 - lm[8].x) * width;
+    const ty = lm[8].y * height;
+    if (!handStates[i]) {
+      handStates[i] = { pos: createVector(tx, ty), prev: createVector(tx, ty),
+                        seen: frameCount, armed: true };
+    }
+    const h = handStates[i];
+    h.pos.lerp(createVector(tx, ty), 0.45);
+    h.seen = frameCount;
+    const palm = Math.hypot(lm[0].x - lm[9].x, lm[0].y - lm[9].y);
+    const pinch = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
+    if (pinch < palm * 0.42 && h.armed) {
+      const hv = p5.Vector.sub(h.pos, h.prev);
+      burst(h.pos.x, h.pos.y, hv.mag() > 2 ? hv.heading() : undefined);
+      h.armed = false;
+    }
+    if (pinch > palm * 0.75) h.armed = true;
+  });
+}
+
+function startHandTracking() {
+  statusEl.textContent = 'loading hand model…';
+  hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+  hands.setOptions({ maxNumHands: 2, modelComplexity: 0,
+                     minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
+  hands.onResults(onHandResults);
+  const video = document.getElementById('video');
+  camera = new Camera(video, {
+    onFrame: async () => { await hands.send({ image: video }); },
+    width: 480, height: 360
+  });
+  camera.start().then(() => {
+    statusEl.textContent = 'hand tracking active — move to raise wind, pinch to burst · 挥手起风，捏合成阵';
+    setTimeout(() => statusEl.textContent = '', 7000);
+  }).catch(err => {
+    statusEl.textContent = 'camera unavailable: ' + err.message;
+    handOn = false;
+    const b = document.getElementById('handBtn');
+    b.textContent = '📷 hand off'; b.classList.remove('on');
+  });
+}
+
+document.getElementById('handBtn').addEventListener('click', function () {
+  handOn = !handOn;
+  if (handOn) { startHandTracking(); this.textContent = '📷 hand on'; }
+  else {
+    if (camera) camera.stop();
+    handStates = [null, null];
+    statusEl.textContent = '';
+    this.textContent = '📷 hand off';
+  }
+  this.classList.toggle('on', handOn);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Touch Wind · Wave | 呼吸的浪</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #05091a; }
+  canvas { display: block; touch-action: none; }
+  #video { display: none; }
+  #hint {
+    position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+    font-family: Georgia, serif; color: rgba(225,232,255,0.8);
+    font-size: 14px; letter-spacing: 2px; text-align: center;
+    pointer-events: none; transition: opacity 2s ease;
+  }
+  #controls { position: fixed; top: 20px; right: 20px; display: flex; gap: 10px; font-family: Georgia, serif; z-index: 10; }
+  .btn {
+    background: rgba(20,28,52,0.6); color: #9db8ff;
+    border: 1px solid rgba(155,175,220,0.3); border-radius: 20px;
+    padding: 8px 18px; font-size: 13px; letter-spacing: 1px;
+    cursor: pointer; backdrop-filter: blur(6px); transition: all 0.3s;
+  }
+  .btn:hover { border-color: rgba(155,175,220,0.7); }
+  .btn.on { background: rgba(90,120,220,0.35); color: #dfe6f5; }
+  #status {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    font-family: Georgia, serif; color: rgba(150,165,200,0.75);
+    font-size: 12px; letter-spacing: 1.5px; pointer-events: none; text-align: center;
+  }
+</style>
+</head>
+<body>
+<div id="hint">stir the breathing swell · 搅动呼吸的浪<br>
+<span style="font-size:11px;opacity:0.6">pinch either hand to bloom the swell · enable sound and camera above</span></div>
+<div id="controls">
+  <button class="btn" id="soundBtn">🔊 sound off</button>
+  <button class="btn" id="handBtn">📷 hand off</button>
+</div>
+<div id="status"></div>
+<video id="video" playsinline></video>
+
+<script>
+/* ============================================================
+   TOUCH WIND · WAVE  |  呼吸的浪
+   ------------------------------------------------------------
+   The same engine as the portfolio preview, exactly: a polar
+   plume cloud of soft ice-light grains. Every grain lives on its
+   own ray from a dense core; plumes are lobes of angle-noise that
+   slowly grow and collapse; the whole mass breathes along its
+   radii and slowly revolves. Turbulence streams every frame, so
+   the cloud flows continuously. No screen wrap: the spring alone
+   contains the mass, so nothing ever pops in from an edge.
+   ============================================================ */
+const N = 3200;
+let particles = [], winds = [], mousePrev;
+let windEnergy = 0, hintFaded = false;
+let handStates = [null, null];
+
+class P {
+  constructor() {
+    this.th = random(TWO_PI);            // polar home: angle
+    this.rr = pow(random(), 0.62);       // dense core, thinning rim
+    this.size = constrain(abs(randomGaussian(1.2, 0.9)), 0.4, 4.5);
+    const Rm = 0.62 * min(width, height);
+    this.pos = createVector(width / 2 + cos(this.th) * this.rr * Rm,
+                            height / 2 + sin(this.th) * this.rr * Rm * 0.72);
+    this.vel = createVector(0, 0);
+  }
+  part(k, sigma) {
+    for (const w of winds) {
+      if (w.vel.mag() > 0.5) {
+        const d = dist(this.pos.x, this.pos.y, w.pos.x, w.pos.y);
+        const s = exp(-(d * d) / (2 * sigma * sigma));
+        if (s > 0.02) {
+          const away = p5.Vector.sub(this.pos, w.pos).normalize();
+          this.vel.add(away.mult(k * s * min(w.vel.mag() * 0.12, 2.6)));
+        }
+      }
+    }
+  }
+  update() {
+    /* polar plume home: lobes of angle-noise grow and collapse,
+       the whole mass breathes along its radii */
+    const lobe = 0.72 + 0.55 * noise(cos(this.th) * 1.6 + 40,
+                                     sin(this.th) * 1.6 + 40, frameCount * 0.004);
+    const breathR = 1 + 0.18 * sin(frameCount * 0.011);
+    const Rm = 0.62 * min(width, height);
+    const rad = this.rr * Rm * lobe * breathR;
+    const hx = width / 2 + cos(this.th) * rad;
+    const hy = height / 2 + sin(this.th) * rad * 0.72;
+    this.vel.add((hx - this.pos.x) * 0.012, (hy - this.pos.y) * 0.012);
+    this.th += 0.00045;                  // slow revolve: the drift
+    /* continuous turbulence, every frame: the flow of the preview */
+    const a = noise(this.pos.x * 0.003, this.pos.y * 0.003, frameCount * 0.005) * TWO_PI * 2;
+    this.vel.add(cos(a) * 0.28, sin(a) * 0.28);
+    this.part(2.6, 45);
+    this.vel.mult(0.92); this.vel.limit(7);
+    this.pos.add(this.vel);
+    /* no wrap: nothing ever pops in from an edge */
+  }
+  show() {
+    /* icy volume, soft-edged: the exact preview palette */
+    const t = constrain(this.vel.mag() / 4, 0, 1);
+    const h = noise(this.pos.x * 0.0012, this.pos.y * 0.0012);
+    stroke(115 + 65 * h + 45 * t, 165 + 55 * h + 35 * t, 225 + 25 * h, 10 + 16 * t);
+    strokeWeight(7 + 6 * this.size);
+    point(this.pos.x, this.pos.y);
+  }
+}
+
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  background(5, 9, 18);
+  mousePrev = createVector(width / 2, height / 2);
+  for (let i = 0; i < N; i++) particles.push(new P());
+  winds = [];
+  for (let i = 0; i < 100; i++) {        // pre-warm: no empty opening
+    noStroke(); fill(5, 9, 18, 7); rect(0, 0, width, height);
+    for (const pt of particles) { pt.update(); pt.show(); }
+  }
+}
+
+function draw() {
+  noStroke(); fill(5, 9, 18, 7); rect(0, 0, width, height);
+
+  winds = [];
+  let anyHand = false;
+  for (const h of handStates) {
+    if (h && frameCount - h.seen < 15) {
+      winds.push({ pos: h.pos.copy(), vel: p5.Vector.sub(h.pos, h.prev) });
+      h.prev = h.pos.copy();
+      anyHand = true;
+    }
+  }
+  if (!anyHand) {
+    const m = createVector(mouseX, mouseY);
+    winds.push({ pos: m.copy(), vel: p5.Vector.sub(m, mousePrev) });
+    mousePrev = m;
+  }
+
+  for (const pt of particles) { pt.update(); pt.show(); }
+
+  let maxV = 0;
+  for (const w of winds) maxV = max(maxV, w.vel.mag());
+  windEnergy = lerp(windEnergy, constrain(maxV / 40, 0, 1), 0.06);
+  updateSound();
+
+  if (!hintFaded && frameCount > 480) {
+    document.getElementById('hint').style.opacity = 0;
+    hintFaded = true;
+  }
+}
+
+/* pinch or click: the mass blooms outward, the breath gathers it home */
+function fireBurst(x, y) {
+  for (const pt of particles) {
+    const d = dist(pt.pos.x, pt.pos.y, x, y);
+    if (d < 300) {
+      const dir = p5.Vector.sub(pt.pos, createVector(x, y)).normalize();
+      dir.rotate(randomGaussian(0, 0.3));
+      pt.vel.add(dir.mult(abs(randomGaussian(7, 3)) * exp(-d / 200)));
+    }
+  }
+  billowSound();
+}
+function mousePressed()  { if (mouseY > 70) fireBurst(mouseX, mouseY); }
+function touchStarted()  { if (mouseY > 70) fireBurst(mouseX, mouseY); return false; }
+function touchMoved()    { return false; }
+function windowResized() { resizeCanvas(windowWidth, windowHeight); background(5, 9, 18); }
+
+/* ==================== SOUND: the breathing cloud ==================== */
+let audioCtx = null, soundOn = false;
+let g1 = null, f1 = null, g2 = null, f2 = null, padGain = null;
+
+function noiseSrc() {
+  const len = audioCtx.sampleRate * 2;
+  const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  const s = audioCtx.createBufferSource();
+  s.buffer = buf; s.loop = true; s.start();
+  return s;
+}
+function buildAudio() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  /* high drifting air, very soft */
+  f1 = audioCtx.createBiquadFilter(); g1 = audioCtx.createGain(); g1.gain.value = 0;
+  f1.type = 'bandpass'; f1.frequency.value = 1100; f1.Q.value = 0.5;
+  noiseSrc().connect(f1).connect(g1).connect(audioCtx.destination);
+  /* the breath bed */
+  f2 = audioCtx.createBiquadFilter(); g2 = audioCtx.createGain(); g2.gain.value = 0;
+  f2.type = 'lowpass'; f2.frequency.value = 340;
+  noiseSrc().connect(f2).connect(g2).connect(audioCtx.destination);
+  /* an icy pad breathing with the cloud */
+  padGain = audioCtx.createGain(); padGain.gain.value = 0;
+  const lp = audioCtx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
+  for (const fr of [220.0, 330.0]) {
+    for (const det of [-5, 5]) {
+      const o = audioCtx.createOscillator();
+      o.type = 'sine'; o.frequency.value = fr; o.detune.value = det;
+      o.connect(lp); o.start();
+    }
+  }
+  lp.connect(padGain).connect(audioCtx.destination);
+}
+function updateSound() {
+  if (!soundOn || !audioCtx) return;
+  const t = audioCtx.currentTime;
+  /* everything inhales and exhales with the visual cycle */
+  const breathe = (Math.sin(frameCount * 0.011) + 1) / 2;
+  const e = windEnergy;
+  g2.gain.setTargetAtTime(0.018 + breathe * 0.030, t, 0.4);
+  f2.frequency.setTargetAtTime(240 + breathe * 260, t, 0.4);
+  g1.gain.setTargetAtTime(0.006 + e * 0.16 + breathe * 0.010, t, 0.15);
+  f1.frequency.setTargetAtTime(800 + e * 1000, t, 0.15);
+  padGain.gain.setTargetAtTime(0.006 + 0.018 * breathe, t, 0.5);
+}
+function billowSound() {                 /* a soft slow billow */
+  if (!soundOn || !audioCtx) return;
+  const t = audioCtx.currentTime;
+  g2.gain.cancelScheduledValues(t);
+  g2.gain.setTargetAtTime(0.16, t, 0.10);
+  g2.gain.setTargetAtTime(0.03, t + 0.5, 0.7);
+  f2.frequency.cancelScheduledValues(t);
+  f2.frequency.setTargetAtTime(560, t, 0.12);
+  f2.frequency.setTargetAtTime(280, t + 0.6, 0.7);
+  g1.gain.cancelScheduledValues(t);
+  g1.gain.setTargetAtTime(0.10, t, 0.08);
+  g1.gain.setTargetAtTime(0.02, t + 0.4, 0.5);
+}
+document.getElementById('soundBtn').addEventListener('click', function () {
+  if (!audioCtx) buildAudio();
+  soundOn = !soundOn;
+  if (soundOn) audioCtx.resume();
+  else { g1.gain.value = 0; g2.gain.value = 0; if (padGain) padGain.gain.value = 0; }
+  this.textContent = soundOn ? '🔊 sound on' : '🔊 sound off';
+  this.classList.toggle('on', soundOn);
+});
+
+/* ==================== HAND TRACKING (no preview window) ==================== */
+let hands = null, camera = null, handOn = false;
+const statusEl = document.getElementById('status');
+
+function onHandResults(results) {
+  if (!results.multiHandLandmarks) return;
+  results.multiHandLandmarks.forEach((lm, i) => {
+    if (i > 1) return;
+    const tx = (1 - lm[8].x) * width;
+    const ty = lm[8].y * height;
+    if (!handStates[i]) {
+      handStates[i] = { pos: createVector(tx, ty), prev: createVector(tx, ty),
+                        seen: frameCount, armed: true };
+    }
+    const h = handStates[i];
+    h.pos.lerp(createVector(tx, ty), 0.45);
+    h.seen = frameCount;
+    const palm = Math.hypot(lm[0].x - lm[9].x, lm[0].y - lm[9].y);
+    const pinch = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
+    if (pinch < palm * 0.42 && h.armed) { fireBurst(h.pos.x, h.pos.y); h.armed = false; }
+    if (pinch > palm * 0.75) h.armed = true;
+  });
+}
+function startHandTracking() {
+  statusEl.textContent = 'loading hand model…';
+  hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+  hands.setOptions({ maxNumHands: 2, modelComplexity: 0,
+                     minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
+  hands.onResults(onHandResults);
+  const video = document.getElementById('video');
+  camera = new Camera(video, {
+    onFrame: async () => { await hands.send({ image: video }); },
+    width: 480, height: 360
+  });
+  camera.start().then(() => {
+    statusEl.textContent = 'hand tracking active — pinch to bloom the swell';
+    setTimeout(() => statusEl.textContent = '', 7000);
+  }).catch(err => {
+    statusEl.textContent = 'camera unavailable: ' + err.message;
+    handOn = false;
+    const b = document.getElementById('handBtn');
+    b.textContent = '📷 hand off'; b.classList.remove('on');
+  });
+}
+document.getElementById('handBtn').addEventListener('click', function () {
+  handOn = !handOn;
+  if (handOn) { startHandTracking(); this.textContent = '📷 hand on'; }
+  else {
+    if (camera) camera.stop();
+    handStates = [null, null];
+    statusEl.textContent = '';
+    this.textContent = '📷 hand off';
+  }
+  this.classList.toggle('on', handOn);
+});
+</script>
+</body>
+</html>

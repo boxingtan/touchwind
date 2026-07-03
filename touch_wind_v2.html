@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Touch Wind v2 — Sound + Hand Gesture | 触风</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+<!-- MediaPipe: hand landmark detection + landmark drawing -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #06080f; }
+  canvas.p5Canvas { display: block; touch-action: none; }
+  #video { display: none; }
+  #hint {
+    position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+    font-family: Georgia, serif; color: rgba(220,230,255,0.75);
+    font-size: 14px; letter-spacing: 2px; text-align: center;
+    pointer-events: none; transition: opacity 2s ease;
+  }
+  #controls {
+    position: fixed; top: 20px; right: 20px; display: flex; gap: 10px;
+    font-family: Georgia, serif; z-index: 10;
+  }
+  .btn {
+    background: rgba(20, 28, 52, 0.6); color: #9db8ff;
+    border: 1px solid rgba(155,175,220,0.3); border-radius: 20px;
+    padding: 8px 18px; font-size: 13px; letter-spacing: 1px;
+    cursor: pointer; backdrop-filter: blur(6px); transition: all 0.3s;
+  }
+  .btn:hover { border-color: rgba(155,175,220,0.7); }
+  .btn.on { background: rgba(90,120,220,0.35); color: #dfe6f5; }
+  #status {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    font-family: Georgia, serif; color: rgba(140,155,190,0.75);
+    font-size: 12px; letter-spacing: 1.5px; pointer-events: none;
+  }
+  /* camera preview window: see what the hand tracker sees */
+  #camPreview {
+    position: fixed; right: 20px; bottom: 20px; width: 240px; height: 180px;
+    border: 1px solid rgba(155,175,220,0.4); border-radius: 8px;
+    background: #000; display: none; z-index: 10;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.6);
+  }
+  #camLabel {
+    position: fixed; right: 24px; bottom: 204px; font-family: Georgia, serif;
+    color: rgba(157,184,255,0.8); font-size: 10.5px; letter-spacing: 1.5px;
+    display: none; z-index: 10;
+  }
+</style>
+</head>
+<body>
+<div id="hint">move to summon the wind · 移动指尖，唤起风<br>
+<span style="font-size:11px;opacity:0.6">enable sound and camera above · pinch either hand for a gust (任意一只手捏合产生狂风)</span></div>
+<div id="controls">
+  <button class="btn" id="soundBtn">🔊 sound off</button>
+  <button class="btn" id="handBtn">📷 hand off</button>
+</div>
+<div id="status"></div>
+<div id="camLabel">HAND TRACKING · 手势识别</div>
+<canvas id="camPreview" width="480" height="360"></canvas>
+<video id="video" playsinline></video>
+
+<script>
+/* ============================================================
+   TOUCH WIND v2.1  |  触风 · 声音与手势版
+   ------------------------------------------------------------
+   Revisions after audience feedback:
+   1. The resting field now fills the screen BEFORE any
+      interaction: the simulation is pre-warmed for 130 frames
+      inside setup(), and the ambient breeze is denser and
+      brighter, matching the "resting field" study.
+   2. TWO hands are tracked. Pinch detection is measured
+      relative to hand size (so it works at any distance from
+      the camera), and bursts are far stronger. No overlay
+      ring is drawn: the hand shows only through the particles
+      it moves.
+   3. A camera preview window (bottom right) shows the webcam
+      image with the detected hand skeleton drawn on top.
+   ============================================================ */
+
+const NUM_PARTICLES = 6000;
+let particles = [];
+let winds = [];            // active wind sources this frame: {pos, vel, sigma}
+let mousePrev;
+let windEnergy = 0;
+let gusts = [];            // travelling directional gusts from a pinch
+let hintFaded = false;
+
+/* two tracked hands: {pos, prev, seen, armed} */
+let handStates = [null, null];
+
+/* ==================== PARTICLES ==================== */
+class Particle {
+  constructor() {
+    this.pos = createVector(random(width), random(height));
+    this.vel = p5.Vector.random2D().mult(random(0.3, 0.9));
+    this.size = constrain(abs(randomGaussian(1.2, 0.9)), 0.4, 4.5);
+  }
+  update() {
+    /* ambient breeze: lively enough to keep laying down filaments */
+    const n = noise(this.pos.x * 0.0016, this.pos.y * 0.0016, frameCount * 0.0025);
+    const a = n * TWO_PI * 2;
+    this.vel.add(cos(a) * 0.034, sin(a) * 0.034);
+
+    /* every active wind source (mouse, hand or gust) pushes */
+    for (const w of winds) {
+      if (w.vel.mag() > 0.5) {
+        const d = dist(this.pos.x, this.pos.y, w.pos.x, w.pos.y);
+        const sigma = w.sigma || 45;
+        const s = exp(-(d * d) / (2 * sigma * sigma));
+        if (s > 0.01) {
+          const push = w.vel.copy().mult(0.28 * s);
+          push.rotate(randomGaussian(0, 0.45));
+          push.mult(abs(randomGaussian(1, 0.5)));
+          this.vel.add(push);
+        }
+      }
+    }
+    this.vel.mult(0.955); this.vel.limit(12);
+    this.pos.add(this.vel);
+    if (this.pos.x < -10) this.pos.x = width + 10;
+    if (this.pos.x > width + 10) this.pos.x = -10;
+    if (this.pos.y < -10) this.pos.y = height + 10;
+    if (this.pos.y > height + 10) this.pos.y = -10;
+  }
+  show() {
+    /* bright blue at rest (the field must read as full, not sparse),
+       agitated particles still outshine it toward warm white */
+    const t = constrain(this.vel.mag() / 5, 0, 1);
+    stroke(lerp(130, 255, t), lerp(168, 235, t), lerp(240, 215, t), lerp(150, 250, t));
+    strokeWeight(this.size * (0.8 + t));
+    point(this.pos.x, this.pos.y);
+  }
+}
+
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  background(6, 8, 15);
+  mousePrev = createVector(width / 2, height / 2);
+  for (let i = 0; i < NUM_PARTICLES; i++) particles.push(new Particle());
+
+  /* PRE-WARM: run the simulation before the first visible frame,
+     so the audience meets a screen already covered in blue
+     filaments, like the resting-field study */
+  winds = [];
+  for (let i = 0; i < 240; i++) {
+    noStroke(); fill(6, 8, 15, 8); rect(0, 0, width, height);
+    for (const pt of particles) { pt.update(); pt.show(); }
+  }
+}
+
+function draw() {
+  /* very slow fade -> long persistent filaments covering the canvas */
+  noStroke(); fill(6, 8, 15, 8); rect(0, 0, width, height);
+
+  /* -------- collect wind sources -------- */
+  winds = [];
+  let anyHand = false;
+  for (const h of handStates) {
+    if (h && frameCount - h.seen < 15) {
+      winds.push({ pos: h.pos.copy(), vel: p5.Vector.sub(h.pos, h.prev) });
+      h.prev = h.pos.copy();
+      anyHand = true;
+    }
+  }
+  if (!anyHand) {           // mouse fallback only when no hand is visible
+    const m = createVector(mouseX, mouseY);
+    winds.push({ pos: m.copy(), vel: p5.Vector.sub(m, mousePrev) });
+    mousePrev = m;
+  }
+
+  /* -------- travelling gusts (from a pinch or a click) --------
+     No overlay graphics: a gust is only a strong, moving wind
+     source, so everything visible stays pure particle motion. */
+  for (let i = gusts.length - 1; i >= 0; i--) {
+    const g = gusts[i];
+    const k = pow(1 - g.age / g.life, 1.4);         // strength decays
+    const v = p5.Vector.fromAngle(g.dir).mult(30 * k + 2);
+    winds.push({ pos: g.pos.copy(), vel: v, sigma: 220 });
+    g.pos.add(v.copy().mult(0.38));                 // the gust travels
+    g.dir += g.curve;                               // and curves gently
+    if (++g.age > g.life) gusts.splice(i, 1);
+  }
+
+  for (const pt of particles) { pt.update(); pt.show(); }
+
+  /* the tracked hand is now shown only through the particles it moves;
+     no ring overlay is drawn */
+
+  /* -------- gesture energy -> sound -------- */
+  let maxV = 0;
+  for (const w of winds) maxV = max(maxV, w.vel.mag());
+  windEnergy = lerp(windEnergy, constrain(maxV / 40, 0, 1), 0.06);
+  updateWindSound();
+
+  if (!hintFaded && frameCount > 480) {
+    document.getElementById('hint').style.opacity = 0;
+    hintFaded = true;
+  }
+}
+
+/* ==================== GUST (directional, particle-only) ====================
+   A pinch or click no longer explodes in a circle. It launches a
+   strong wind source that sweeps across the canvas for about a
+   second, curving slightly, so the particles comb into the long
+   feathered streaks of the print renders. */
+function burst(x, y, dirAngle) {
+  if (dirAngle === undefined) dirAngle = random(TWO_PI);
+  gusts.push({
+    pos: createVector(x, y),
+    dir: dirAngle + randomGaussian(0, 0.15),
+    curve: randomGaussian(0, 0.014),      // each gust bends its own way
+    age: 0, life: 55
+  });
+  gustSound();
+}
+
+function mousePressed() {
+  if (mouseY <= 70) return;
+  const v = createVector(movedX, movedY);
+  burst(mouseX, mouseY, v.mag() > 2 ? v.heading() : undefined);
+}
+function touchStarted()  { if (mouseY > 70) burst(mouseX, mouseY); return false; }
+function touchMoved()    { return false; }
+function windowResized() { resizeCanvas(windowWidth, windowHeight); }
+
+/* ==================== WIND SOUND SYNTHESIS ==================== */
+let audioCtx = null, noiseGain = null, bandpass = null, rumbleGain = null, rumbleFilter = null;
+let forestGain = null, forestFilter = null, birdTimer = null;
+let flutterLFO = null, flutterDepth = null;
+let soundOn = false;
+
+function buildAudio() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const len = audioCtx.sampleRate * 2;
+  const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+
+  /* layer 1: the breath — a light, airy wind pitched higher than a
+     howl, because feathers answer a breath, not a storm */
+  const src1 = audioCtx.createBufferSource();
+  src1.buffer = buf; src1.loop = true;
+  bandpass = audioCtx.createBiquadFilter();
+  bandpass.type = 'bandpass'; bandpass.frequency.value = 900; bandpass.Q.value = 0.7;
+  noiseGain = audioCtx.createGain(); noiseGain.gain.value = 0;
+  src1.connect(bandpass).connect(noiseGain).connect(audioCtx.destination);
+  src1.start();
+
+  /* feather flutter: a fast gentle tremolo (~13 Hz) on the breath,
+     the sound of vanes trembling in moving air */
+  flutterLFO = audioCtx.createOscillator();
+  flutterLFO.type = 'sine'; flutterLFO.frequency.value = 13;
+  flutterDepth = audioCtx.createGain(); flutterDepth.gain.value = 0;
+  flutterLFO.connect(flutterDepth).connect(noiseGain.gain);
+  flutterLFO.start();
+
+  /* layer 2: soft down — a quiet cushion of low air, much lighter
+     than the old rumble */
+  const src2 = audioCtx.createBufferSource();
+  src2.buffer = buf; src2.loop = true;
+  rumbleFilter = audioCtx.createBiquadFilter();
+  rumbleFilter.type = 'lowpass'; rumbleFilter.frequency.value = 320;
+  rumbleGain = audioCtx.createGain(); rumbleGain.gain.value = 0;
+  src2.connect(rumbleFilter).connect(rumbleGain).connect(audioCtx.destination);
+  src2.start();
+
+  /* layer 3: the forest — a soft leaf-rustle bed heard when the
+     air is still, made of the same noise through a gentle lowpass */
+  const src3 = audioCtx.createBufferSource();
+  src3.buffer = buf; src3.loop = true;
+  src3.playbackRate.value = 0.6;                 // slower = softer texture
+  forestFilter = audioCtx.createBiquadFilter();
+  forestFilter.type = 'lowpass'; forestFilter.frequency.value = 650;
+  forestGain = audioCtx.createGain(); forestGain.gain.value = 0;
+  src3.connect(forestFilter).connect(forestGain).connect(audioCtx.destination);
+  src3.start();
+
+  /* birds: occasional short synthesised chirps, only in calm air */
+  scheduleBird();
+}
+
+function birdChirp() {
+  const t0 = audioCtx.currentTime;
+  const n = 1 + Math.floor(Math.random() * 3);   // 1–3 notes
+  for (let i = 0; i < n; i++) {
+    const t = t0 + i * (0.13 + Math.random() * 0.08);
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    const f = 2500 + Math.random() * 1400;
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(f, t);
+    osc.frequency.exponentialRampToValueAtTime(f * (1.15 + Math.random() * 0.2), t + 0.05);
+    osc.frequency.exponentialRampToValueAtTime(f * 0.85, t + 0.11);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.028 + Math.random() * 0.02, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+    osc.connect(g).connect(audioCtx.destination);
+    osc.start(t); osc.stop(t + 0.2);
+  }
+}
+
+function scheduleBird() {
+  birdTimer = setTimeout(() => {
+    /* birds sing only when sound is on and the wind is quiet */
+    if (soundOn && audioCtx && windEnergy < 0.12) birdChirp();
+    scheduleBird();
+  }, 2500 + Math.random() * 6500);
+}
+
+function updateWindSound() {
+  if (!soundOn || !audioCtx) return;
+  const t = audioCtx.currentTime;
+  const wobble = noise(frameCount * 0.008) * 0.5 + 0.75;
+  const e = windEnergy * wobble;
+  /* light breath: quieter and higher than a howl */
+  noiseGain.gain.setTargetAtTime(0.015 + e * 0.20, t, 0.08);
+  bandpass.frequency.setTargetAtTime(750 + e * 1900, t, 0.10);
+  /* flutter deepens and quickens as the feathers stir */
+  flutterDepth.gain.setTargetAtTime(e * 0.10, t, 0.10);
+  flutterLFO.frequency.setTargetAtTime(10 + e * 9 + noise(frameCount * 0.01 + 20) * 3, t, 0.15);
+  rumbleGain.gain.setTargetAtTime(0.015 + e * 0.08, t, 0.12);
+  /* forest bed crossfades out as the wind rises; a slow noise
+     wobble makes the leaves breathe */
+  const calm = constrain(1 - windEnergy * 6, 0, 1);
+  const leaves = noise(frameCount * 0.004 + 50) * 0.5 + 0.6;
+  forestGain.gain.setTargetAtTime(0.035 * calm * leaves, t, 0.4);
+  forestFilter.frequency.setTargetAtTime(450 + leaves * 400, t, 0.5);
+}
+
+function gustSound() {
+  if (!soundOn || !audioCtx) return;
+  const t = audioCtx.currentTime;
+  /* a soft PUFF, not a whoosh: quick airy swell that fades fast,
+     with the flutter surging as the feathers take flight */
+  noiseGain.gain.cancelScheduledValues(t);
+  noiseGain.gain.setTargetAtTime(0.30, t, 0.025);
+  noiseGain.gain.setTargetAtTime(0.03, t + 0.18, 0.28);
+  bandpass.frequency.cancelScheduledValues(t);
+  bandpass.frequency.setTargetAtTime(2800, t, 0.03);
+  bandpass.frequency.setTargetAtTime(900, t + 0.25, 0.4);
+  flutterDepth.gain.cancelScheduledValues(t);
+  flutterDepth.gain.setTargetAtTime(0.14, t, 0.03);
+  flutterDepth.gain.setTargetAtTime(0.01, t + 0.5, 0.5);
+  /* two faint airy ticks, feather shafts brushing */
+  for (let i = 0; i < 2; i++) {
+    const tt = t + 0.06 + i * 0.11 + Math.random() * 0.04;
+    const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+    o.type = 'triangle'; o.frequency.value = 1900 + Math.random() * 1300;
+    g.gain.setValueAtTime(0, tt);
+    g.gain.linearRampToValueAtTime(0.02, tt + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, tt + 0.09);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(tt); o.stop(tt + 0.12);
+  }
+}
+
+document.getElementById('soundBtn').addEventListener('click', function () {
+  if (!audioCtx) buildAudio();
+  soundOn = !soundOn;
+  if (soundOn) audioCtx.resume();
+  else { noiseGain.gain.value = 0; rumbleGain.gain.value = 0; forestGain.gain.value = 0; }
+  this.textContent = soundOn ? '🔊 sound on' : '🔊 sound off';
+  this.classList.toggle('on', soundOn);
+});
+
+/* ==================== HAND GESTURE RECOGNITION ==================== */
+let hands = null, camera = null, handOn = false;
+const statusEl = document.getElementById('status');
+const previewCanvas = document.getElementById('camPreview');
+const previewCtx = previewCanvas.getContext('2d');
+
+function onHandResults(results) {
+  /* ---- camera preview window: mirrored image + hand skeleton ---- */
+  previewCtx.save();
+  previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+  previewCtx.translate(previewCanvas.width, 0);
+  previewCtx.scale(-1, 1);                       // mirror, like a mirror
+  previewCtx.drawImage(results.image, 0, 0, previewCanvas.width, previewCanvas.height);
+  if (results.multiHandLandmarks) {
+    for (const lm of results.multiHandLandmarks) {
+      drawConnectors(previewCtx, lm, HAND_CONNECTIONS, { color: '#9db8ff', lineWidth: 3 });
+      drawLandmarks(previewCtx, lm, { color: '#ffffff', lineWidth: 1, radius: 3 });
+    }
+  }
+  previewCtx.restore();
+
+  if (!results.multiHandLandmarks) return;
+
+  /* ---- drive the wind with up to TWO hands ---- */
+  results.multiHandLandmarks.forEach((lm, i) => {
+    if (i > 1) return;
+    const tx = (1 - lm[8].x) * width;            // index fingertip, mirrored
+    const ty = lm[8].y * height;
+
+    if (!handStates[i]) {
+      handStates[i] = { pos: createVector(tx, ty), prev: createVector(tx, ty),
+                        seen: frameCount, armed: true };
+    }
+    const h = handStates[i];
+    h.pos.lerp(createVector(tx, ty), 0.45);      // smooth the jitter
+    h.seen = frameCount;
+
+    /* pinch measured RELATIVE to hand size, so it works at any
+       distance from the camera: compare thumb-to-index distance
+       with the palm length (wrist -> middle-finger base) */
+    const palm = Math.hypot(lm[0].x - lm[9].x, lm[0].y - lm[9].y);
+    const pinch = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
+    if (pinch < palm * 0.42 && h.armed) {
+      /* gust flies in the direction the hand was moving */
+      const hv = p5.Vector.sub(h.pos, h.prev);
+      burst(h.pos.x, h.pos.y, hv.mag() > 2 ? hv.heading() : undefined);
+      h.armed = false;
+    }
+    if (pinch > palm * 0.75) h.armed = true;
+  });
+}
+
+function startHandTracking() {
+  statusEl.textContent = 'loading hand model…';
+  hands = new Hands({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+  });
+  hands.setOptions({
+    maxNumHands: 2,                              // both hands
+    modelComplexity: 0,
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.5
+  });
+  hands.onResults(onHandResults);
+
+  const video = document.getElementById('video');
+  camera = new Camera(video, {
+    onFrame: async () => { await hands.send({ image: video }); },
+    width: 480, height: 360
+  });
+  camera.start().then(() => {
+    previewCanvas.style.display = 'block';
+    document.getElementById('camLabel').style.display = 'block';
+    statusEl.textContent = 'hand tracking active — wave at the camera, pinch to burst · 捏合手指产生狂风';
+    setTimeout(() => statusEl.textContent = '', 7000);
+  }).catch(err => {
+    statusEl.textContent = 'camera unavailable: ' + err.message;
+    handOn = false;
+    const b = document.getElementById('handBtn');
+    b.textContent = '📷 hand off'; b.classList.remove('on');
+  });
+}
+
+document.getElementById('handBtn').addEventListener('click', function () {
+  handOn = !handOn;
+  if (handOn) {
+    startHandTracking();
+    this.textContent = '📷 hand on';
+  } else {
+    if (camera) camera.stop();
+    handStates = [null, null];
+    previewCanvas.style.display = 'none';
+    document.getElementById('camLabel').style.display = 'none';
+    statusEl.textContent = '';
+    this.textContent = '📷 hand off';
+  }
+  this.classList.toggle('on', handOn);
+});
+</script>
+</body>
+</html>

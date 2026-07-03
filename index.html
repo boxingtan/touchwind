@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Touch Wind · A Series in Four Movements | Liu Tianren</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+<style>
+  :root {
+    --bg: #06080f;
+    --ink: #dfe6f5;
+    --dim: #8b96b3;
+    --accent: #9db8ff;
+    --line: rgba(155, 175, 220, 0.18);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: Georgia, "Times New Roman", serif;
+    line-height: 1.7;
+  }
+  /* ---------- hero with live artwork ---------- */
+  #hero { position: relative; height: 100vh; overflow: hidden; }
+  #sketch-holder { position: absolute; inset: 0; }
+  #sketch-holder canvas { display: block; }
+  .hero-text {
+    position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%);
+    text-align: center; pointer-events: none; mix-blend-mode: screen;
+  }
+  .hero-text h1 {
+    font-size: clamp(3rem, 9vw, 7rem); font-weight: 400;
+    letter-spacing: 0.22em; text-indent: 0.22em;
+  }
+  .hero-text p { color: var(--dim); letter-spacing: 0.3em; text-transform: uppercase; font-size: 0.8rem; margin-top: 1rem; }
+  .scroll-hint {
+    position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+    color: var(--dim); font-size: 0.72rem; letter-spacing: 0.25em; text-transform: uppercase;
+    animation: bob 2.4s ease-in-out infinite; pointer-events: none;
+  }
+  .mode-bar {
+    position: absolute; bottom: 62px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 8px; z-index: 5; flex-wrap: wrap; justify-content: center;
+  }
+  .mode-btn {
+    background: rgba(16, 22, 42, 0.55); color: var(--dim);
+    border: 1px solid var(--line); border-radius: 18px;
+    padding: 7px 16px; font-family: Georgia, serif; font-size: 0.8rem;
+    letter-spacing: 0.08em; cursor: pointer; backdrop-filter: blur(6px);
+    transition: all 0.3s;
+  }
+  .mode-btn:hover { color: var(--ink); border-color: rgba(155,175,220,0.6); }
+  .mode-btn.on { color: var(--ink); background: rgba(90,120,220,0.30); border-color: rgba(155,175,220,0.7); }
+  @keyframes bob { 50% { transform: translate(-50%, 8px); } }
+  /* ---------- sections ---------- */
+  section { max-width: 880px; margin: 0 auto; padding: 7rem 2rem 0; }
+  section.wide { max-width: 1200px; }
+  h2 {
+    font-size: 0.85rem; letter-spacing: 0.35em; text-transform: uppercase;
+    color: var(--accent); font-weight: 400; margin-bottom: 2.2rem;
+  }
+  h2::after { content: ""; display: block; width: 48px; border-bottom: 1px solid var(--line); margin-top: 1rem; }
+  .lede { font-size: 1.35rem; line-height: 1.85; }
+  .body-text { color: var(--dim); margin-top: 1.4rem; font-size: 1.02rem; }
+  em { color: var(--ink); font-style: italic; }
+  /* ---------- technique cards ---------- */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); margin-top: 1rem; }
+  .card { background: var(--bg); padding: 2rem 1.6rem; }
+  .card h3 { font-size: 1.05rem; font-weight: 400; letter-spacing: 0.06em; margin-bottom: 0.8rem; color: var(--ink); }
+  .card p { color: var(--dim); font-size: 0.92rem; }
+  .card .formula {
+    font-family: Consolas, monospace; font-size: 0.8rem; color: var(--accent);
+    margin-top: 1.1rem; opacity: 0.85; word-break: break-all;
+  }
+  /* ---------- gallery ---------- */
+  .gallery { display: grid; gap: 2.5rem; margin-top: 1rem; }
+  .gallery figure img { width: 100%; display: block; border: 1px solid var(--line); }
+  .gallery figcaption { color: var(--dim); font-size: 0.82rem; letter-spacing: 0.08em; margin-top: 0.7rem; }
+  .gallery .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem; }
+  @media (max-width: 700px) { .gallery .pair { grid-template-columns: 1fr; } }
+  /* ---------- series movements ---------- */
+  .movement { margin-top: 4.5rem; }
+  .movement .m-head { display: flex; align-items: baseline; gap: 1.2rem; margin-bottom: 1.2rem; }
+  .movement .m-num { font-size: 2.4rem; font-style: italic; color: var(--accent); opacity: 0.55; }
+  .movement h3 { font-weight: 400; font-size: 1.5rem; letter-spacing: 0.04em; }
+  .movement .m-cn { color: var(--dim); font-size: 1.05rem; margin-left: 0.4rem; }
+  .m-tag {
+    font-size: 0.65rem; letter-spacing: 0.2em; text-transform: uppercase;
+    border: 1px solid var(--line); border-radius: 12px; padding: 3px 12px;
+    color: var(--accent); white-space: nowrap;
+  }
+  .movement img { width: 100%; display: block; border: 1px solid var(--line); }
+  .movement .m-body { color: var(--dim); margin-top: 1.3rem; font-size: 1.0rem; }
+  .movement .m-play { margin-top: 0.9rem; font-size: 0.95rem; color: var(--ink); }
+  .movement .m-play span { color: var(--accent); letter-spacing: 0.15em; font-size: 0.72rem; text-transform: uppercase; margin-right: 0.7rem; }
+  .m-try { margin-top: 1.2rem; display: flex; gap: 10px; flex-wrap: wrap; }
+  .try-btn {
+    display: inline-block; text-decoration: none;
+    color: var(--ink); background: rgba(90, 120, 220, 0.22);
+    border: 1px solid rgba(155, 175, 220, 0.5); border-radius: 20px;
+    padding: 9px 22px; font-size: 0.88rem; letter-spacing: 0.08em;
+    transition: all 0.3s;
+  }
+  .try-btn:hover { background: rgba(90, 120, 220, 0.4); border-color: rgba(155, 175, 220, 0.9); }
+  .try-btn.alt { background: transparent; color: var(--dim); }
+  .try-btn.alt:hover { color: var(--ink); }
+  /* ---------- process ---------- */
+  .steps { counter-reset: step; margin-top: 0.5rem; }
+  .step { display: grid; grid-template-columns: 64px 1fr; gap: 1.4rem; padding: 1.5rem 0; border-bottom: 1px solid var(--line); }
+  .step::before {
+    counter-increment: step; content: "0" counter(step);
+    font-size: 1.6rem; color: var(--accent); opacity: 0.55; font-style: italic;
+  }
+  .step h3 { font-weight: 400; font-size: 1.05rem; margin-bottom: 0.3rem; }
+  .step p { color: var(--dim); font-size: 0.95rem; }
+  /* ---------- footer ---------- */
+  footer { margin-top: 7rem; padding: 3rem 2rem 4rem; border-top: 1px solid var(--line); text-align: center; color: var(--dim); font-size: 0.85rem; letter-spacing: 0.08em; }
+  footer .sig { color: var(--ink); font-size: 1rem; margin-bottom: 0.5rem; }
+</style>
+</head>
+<body>
+
+<!-- ================= HERO: the live artwork ================= -->
+<div id="hero">
+  <div id="sketch-holder"></div>
+  <div class="hero-text">
+    <h1>TOUCH WIND</h1>
+    <p>A series in four movements · 触风系列 · 2026</p>
+  </div>
+  <div class="mode-bar">
+    <button class="mode-btn on" data-mode="feather">I · Feather 羽</button>
+    <button class="mode-btn" data-mode="cloud">II · Wave 浪</button>
+    <button class="mode-btn" data-mode="grass">III · Grass 草</button>
+    <button class="mode-btn" data-mode="fire">IV · Fire 焰</button>
+      </div>
+  <div class="scroll-hint">choose a material · move to touch it · scroll to read</div>
+</div>
+
+<!-- ================= STATEMENT ================= -->
+<section>
+  <h2>Statement</h2>
+  <p class="lede">Wind cannot be seen; only what it touches can. <em>Touch Wind</em> is a series of four interactive fields in which the same wind is given four different materials to speak through: feather, fire, grass and wave. The visitor's hand is the wind; the movements differ only in how the material answers.</p>
+  <p class="body-text">Beneath all four movements runs a single unchanging system: thousands of particles, a slow Perlin current, and a hand whose velocity is injected into the field through a Gaussian distribution, so that most particles obey the gesture while a few rebel and fly wide. What changes from movement to movement is the temperament of the matter. Feather flies at the lightest breath, scattering bright and settling slow; fire fills the frame edge to edge, rolling and rising in red, orange and yellow, and answers the hand with bursts of sparks; grass is rooted, bowing and springing back rather than flying away; the wave is a single breathing swell of powder that surges, breaks and reforms, drifting across the frame and healing behind every touch. In every movement the material covers the whole screen and never drains away: the frame stays full, and the visitor interacts with a living surface rather than watching one empty. Touching the same wind, the visitor receives four different answers, and the series becomes a study of how material character, not the force applied to it, decides what a touch means.</p>
+  <p class="body-text">The work belongs to a tradition of gestural systems explored by artists such as Zach Lieberman and studios such as teamLab, in which the artwork is not an image but a set of rules, completed only by the audience.</p>
+</section>
+
+<!-- ================= TECHNIQUE ================= -->
+<section class="wide">
+  <h2>Technique · the shared engine</h2>
+  <p class="body-text" style="max-width:880px; margin-top:0">All four movements run on the same four components; each movement re-tunes them. Fire adds a strong updraft and recycles every ember from the top of the frame back to the base, so the blaze can never empty; grass anchors every particle to a root; the wave is a powder of twenty-six thousand one-pixel grains, breathing and drifting as one body; and every material covers the frame at rest and refills after every storm.</p>
+  <div class="cards">
+    <div class="card">
+      <h3>Particle field</h3>
+      <p>Two to six thousand particles depending on the movement, each a position and a velocity, redrawn sixty times per second. Fading trails are produced by veiling each frame with a translucent layer rather than erasing it.</p>
+      <div class="formula">pos += vel; vel *= 0.955</div>
+    </div>
+    <div class="card">
+      <h3>Perlin breeze</h3>
+      <p>A noise field assigns every point in space a smoothly varying direction, giving the resting state its slow, coherent currents. A third noise dimension moves the whole field through time.</p>
+      <div class="formula">θ = noise(x·s, y·s, t) · 4π</div>
+    </div>
+    <div class="card">
+      <h3>Gaussian wind</h3>
+      <p>The pointer's velocity is injected into nearby particles. Strength decays as a Gaussian bell of distance; direction and magnitude are individually perturbed by Gaussian noise, producing the splatter.</p>
+      <div class="formula">w = e^(−d²/2σ²), θ ~ N(0, 0.45)</div>
+    </div>
+    <div class="card">
+      <h3>Light from energy</h3>
+      <p>Colour is mapped to speed: still air renders as deep blue, agitated air as warm white. The gesture literally illuminates its own path, then fades as drag returns the field to rest.</p>
+      <div class="formula">colour = lerp(blue, white, |v|)</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= THE SERIES ================= -->
+<section class="wide">
+  <h2>The series · four movements</h2>
+  <p class="body-text" style="max-width:880px">One wind, four materials, all playable side by side: the field at the top of this page switches between every movement through the mode bar. Every movement is additionally realised as a full installation version with camera hand tracking and its own synthesised sound: the fire roars and crackles, the meadow rustles with evening crickets, and the wave inhales and exhales as a breathing tide that drifts with the powder. Each movement also exists as high-resolution studies rendered offline by the same engine.</p>
+
+  <div class="movement">
+    <div class="m-head"><span class="m-num">I</span><h3>Feather<span class="m-cn">触羽</span></h3><span class="m-tag">Realised · Installation + web</span></div>
+    <img src="still_1_web.jpg" alt="Particles combed into long feathered barbs by a single gesture">
+    <p class="m-body">Wind as feather. Six thousand luminous particles rise at the lightest breath: most follow the gesture while a Gaussian minority scatters wide, and every sweep combs the field into long feathered barbs, as if a plume had been drawn through ink and light. Colour is bound to speed. At rest each grain holds a deep periwinkle blue, close to the ink-dark ground; as the hand accelerates it warms through pale steel to an almost warm white at the crest of a gust, so that brightness reads directly as energy and the down settles back into blue once the air stills. The palette is deliberately narrow, a single cool blue lifted only by the white of motion, so the eye follows the gesture rather than the colour. The movement grows from the gestural ink-and-light studies of Zach Lieberman, in which a mark is the trace of a hand in time, and from the audience-completed fields of teamLab, where the work is a set of rules finished only by whoever touches it. Its animating idea is lightness: a material that answers the smallest force and forgets it slowly.</p>
+    <p class="m-play"><span>How to play</span>Move the hand or mouse to raise wind; pinch two fingers and a gust sweeps in the direction of the movement; with sound on, the wind howls with the gesture, and a synthesised forest returns in the calm.</p>
+    <p class="m-try">
+      <a class="try-btn" href="#hero" onclick="switchMode('feather')">Experience Feather ↑</a>
+      <a class="try-btn alt" href="touch_wind_v2.html" target="_blank">Installation version — sound + camera hand tracking ↗</a>
+    </p>
+    <div class="gallery" style="margin-top:2rem"><div class="pair">
+      <figure><img src="still_2_web.jpg" alt="Turbulence at the crest of the gust"><figcaption>Study — turbulence at the crest of the gust</figcaption></figure>
+      <figure><img src="still_calm_web.jpg" alt="The resting field, untouched"><figcaption>Study — the resting field, untouched, breeze only</figcaption></figure>
+    </div></div>
+  </div>
+
+  <div class="movement">
+    <div class="m-head"><span class="m-num">II</span><h3>Wave<span class="m-cn">呼吸的浪</span></h3><span class="m-tag">Realised · Installation + web</span></div>
+    <img src="still_cloudp_web.jpg" alt="A breathing swell of soft sea-light, dense at the core, breaking into spray at the rim">
+    <p class="m-body">Wind as wave. The movement is a single breathing swell of soft sea-light. Every grain lives on its own ray from a dense core, so the mass is solid at its heart and breaks into spray at the rim; lobes of foam slowly gather and collapse around the circumference while the whole body draws in and surges out along its radii, turning almost imperceptibly, the way a long ocean swell rises and settles without ever leaving the frame. The palette is the coldest in the series, a graded sea blue that runs from a pale, almost white foam at the lit crests to a deep marine blue in the troughs, laid down grain by grain at very low opacity so that density alone builds the light, in the manner of a volumetric render rather than a drawn line. The lit crests carry a faint pearl sheen, the brightest ridges picked out and screened back over the body so the water reads as luminous matter rather than flat fog. Because each grain belongs to a ray, no touch can scatter the swell for long: the tide always gathers it home. The movement draws on the breathing volumetric water studies of the TouchDesigner community, in which a blue mass endlessly surges, breaks and reforms, and it expresses the calmest possible answer to a touch, which is to absorb it and return to rest.</p>
+    <p class="m-play"><span>How to play</span>Move through the swell and the spray stirs and scatters around the hand; hold still and the drifting water closes over the path; a pinch blooms the whole mass outward in a slow surge that folds back into itself.</p>
+    <p class="m-try">
+      <a class="try-btn" href="#hero" onclick="switchMode('cloud')">Experience Wave ↑</a>
+      <a class="try-btn alt" href="touch_wind_cloud.html" target="_blank">Installation version — powder particles, sound + camera hand tracking ↗</a>
+    </p>
+    <div class="gallery" style="margin-top:2rem"><div class="pair">
+      <figure><img src="still_cloudp_b_web.jpg" alt="The swell drawn wide, fine filaments radiating from a bright core"><figcaption>Study — the swell drawn wide, a brighter core</figcaption></figure>
+      <figure><img src="still_cloudp_c_web.jpg" alt="The mass bloomed open by a touch, filaments spiralling outward"><figcaption>Study — the mass bloomed open by a touch</figcaption></figure>
+    </div></div>
+  </div>
+
+  <div class="movement">
+    <div class="m-head"><span class="m-num">III</span><h3>Grass<span class="m-cn">草浪</span></h3><span class="m-tag">Realised · Installation + web</span></div>
+    <img src="still_grass_live_web.jpg" alt="The interactive resting field: thousands of rooted blades swaying on dark green">
+    <p class="m-body">Here the particles are rooted. Thousands of blades cannot fly away, so the wind can only bend them: a gesture crossing the meadow leaves a brightened swath where every blade bows along the path and springs back, one after another, so the wave keeps travelling after the hand has gone. Colour carries the same rule of energy as the rest of the series, but on a warm green register. Each blade holds a saturated field green that lightens toward the tip as it bows, brightening along the swept path so the wake reads as light as much as motion; through the green a scattered few blades, roughly one in ten, burn a golden yellow, so the meadow is never a flat colour but a green shot through with gold. Above, the interactive field at rest, exactly as a visitor first meets it; below, offline studies that render the same meadow in perspective, distant blades crowding dark toward the treeline and near ones rising into the light. The palette borrows the saturated pop greens and scattered gold of Yayoi Kusama, carried by blades rather than her dots, and the movement expresses obedience with memory: a material that yields to every touch and forgets none of its roots.</p>
+    <p class="m-play"><span>How to play</span>Sweep the hand and a wake of bowing grass streams downwind along the path, like a gust crossing a meadow; a pinch flattens a circle of meadow that recovers blade by blade; holding still lets the whole field sway to the ambient breeze.</p>
+    <p class="m-try">
+      <a class="try-btn" href="#hero" onclick="switchMode('grass')">Experience Grass ↑</a>
+      <a class="try-btn alt" href="touch_wind_live.html?m=grass" target="_blank">Installation version — sound + camera hand tracking ↗</a>
+    </p>
+    <div class="gallery" style="margin-top:2rem"><div class="pair">
+      <figure><img src="still_grass_b_web.jpg" alt="The meadow under a stronger gust, swath burning brighter"><figcaption>Study — a stronger wind, the swath burning brighter</figcaption></figure>
+      <figure><img src="still_grass_c_web.jpg" alt="The meadow untouched in evening light"><figcaption>Study — the meadow untouched, evening light</figcaption></figure>
+    </div></div>
+  </div>
+
+  <div class="movement">
+    <div class="m-head"><span class="m-num">IV</span><h3>Fire<span class="m-cn">风火山林</span></h3><span class="m-tag">Realised · Installation + web</span></div>
+    <img src="still_fire_web.jpg" alt="A full-screen blaze of red, orange and yellow particles rolling and rising">
+    <p class="m-body">Wind as fire. A burning bed runs the full width of the frame, and from it crimson tongues are continually born: each rises on its own heat, curls in the turbulence, cools from a yellow-orange core to deep ember red, dies, and is reborn at the base. Colour is mapped to heat and speed together. A young, fast tongue burns near white-gold at its tip, falls through orange as it climbs, and settles into a dark crimson before it fails, so the blaze is a continuous gradient from pale gold at the living edge to blood red in the spent smoke, all read against a near-black ground that lets the light carry. The fire is a fountain rather than a texture, tendrils licking upward into the black, and it can never burn itself out: however hard the hand stirs it, new flames keep rising from below, and no tongue ever falls, since the fire knows only one direction. The movement draws on the crimson GPU-particle experiments of the TouchDesigner community, and expresses the moment a gust feeds a blaze rather than blowing it out.</p>
+    <p class="m-play"><span>How to play</span>Move the hand and the flames bend and race after it; a pinch detonates an explosion of sparks that leap upward and fall back into the blaze; with sound on, the fire roars with the gesture and crackles underneath.</p>
+    <p class="m-try">
+      <a class="try-btn" href="#hero" onclick="switchMode('fire')">Experience Fire ↑</a>
+      <a class="try-btn alt" href="touch_wind_live.html?m=fire" target="_blank">Installation version — sound + camera hand tracking ↗</a>
+    </p>
+    <div class="gallery" style="margin-top:2rem"><div class="pair">
+      <figure><img src="still_fire_b_web.jpg" alt="The blaze whipped by a passing gesture"><figcaption>Study — the fire gathered into a single central blaze</figcaption></figure>
+      <figure><img src="still_fire_c_web.jpg" alt="The fire at rest, rolling on its own updraft"><figcaption>Study — the fire at rest, rolling on its own updraft</figcaption></figure>
+    </div></div>
+  </div>
+
+  
+</section>
+
+<!-- ================= PROCESS ================= -->
+<section>
+  <h2>Process</h2>
+  <p class="body-text" style="margin-top:0">The engine behind every movement was built in seven stages, with the Feather movement as the proving ground; each stage produced a running sketch, so progress stayed visible throughout.</p>
+  <div class="steps">
+    <div class="step"><div><h3>Canvas and trails</h3><p>A full-window canvas veiled each frame by a translucent rectangle, so that motion leaves fading streaks.</p></div></div>
+    <div class="step"><div><h3>The particle field</h3><p>A Particle class holding position and velocity, instantiated 2,600 times into an array.</p></div></div>
+    <div class="step"><div><h3>Ambient breeze</h3><p>Perlin noise sampled at each particle's position becomes a steering angle; drag and a speed limit keep the system stable.</p></div></div>
+    <div class="step"><div><h3>Reading the gesture</h3><p>The pointer's frame-to-frame displacement is measured as a velocity vector: the wind is the movement of the hand, not its position.</p></div></div>
+    <div class="step"><div><h3>Gaussian injection</h3><p>Each nearby particle receives the gesture vector scaled by a Gaussian falloff, rotated and re-scaled by further Gaussian draws.</p></div></div>
+    <div class="step"><div><h3>Colour and light</h3><p>Speed mapped to a blue-to-white gradient, so energy becomes luminosity.</p></div></div>
+    <div class="step"><div><h3>Touch and burst</h3><p>Edge wrapping keeps the field full; a tap detonates a radial Gaussian gust; touch handlers suppress page scrolling on mobile.</p></div></div>
+  </div>
+</section>
+
+<!-- ================= DEVELOPMENT ================= -->
+<section>
+  <h2>Development</h2>
+  <p class="body-text" style="margin-top:0">The work developed through three versions over the summer of 2026, each adding one sensory channel: first sight, then print, then sound and the body.</p>
+  <div class="steps">
+    <div class="step"><div>
+      <h3>Version 1 — the mouse wind</h3>
+      <p>The core system: 2,600 particles, a Perlin flow field, and pointer velocity injected with Gaussian falloff and Gaussian scatter. The main problem solved here was stability. Early builds accumulated energy until the screen dissolved into noise; the cure was air resistance (velocity multiplied by 0.955 each frame) together with a hard speed limit. The second discovery was that wind must be the movement of the hand, not its position: switching from position to frame-to-frame velocity made the piece feel physical.</p>
+    </div></div>
+    <div class="step"><div>
+      <h3>Print renders — re-simulating for paper</h3>
+      <p>A browser canvas cannot be printed at exhibition quality, so the identical algorithm was rewritten offline (Python, vectorised over all particles at once) and run at A3 resolution with a scripted S-curve gesture standing in for the hand. Thousands of translucent trail segments were composited, then a blurred bright pass was screened on top for glow. The first renders came out almost black; the fix was a slower trail fade, higher per-particle opacity, and a gamma lift that brightens mid-tones while preserving the blacks. These renders became the poster and the stills above.</p>
+    </div></div>
+    <div class="step"><div>
+      <h3>Version 2 — sound and the body</h3>
+      <p>Two channels were added. The wind is now audible: looped white noise passes through a bandpass filter into a gain node (Web Audio API), and gesture energy raises both volume and filter frequency, so fast movement literally howls; a slow Perlin wobble makes the sound gust even when the hand is steady. Browsers refuse to autoplay audio, so the synthesiser is built only inside a user click on the sound button. The hand itself then replaced the mouse: MediaPipe Hands tracks 21 landmarks through the webcam, the index fingertip becomes the wind source (mirrored horizontally so movement feels natural, smoothed with interpolation to remove jitter), and a pinch of thumb against index fires a Gaussian burst. The mouse remains as a fallback whenever no hand is in view.</p>
+    </div></div>
+  </div>
+  <div class="steps" style="margin-top:0">
+    <div class="step"><div>
+      <h3>Version 2.1 — revisions from audience feedback</h3>
+      <p>Testing with viewers exposed three weaknesses. The opening screen was mostly black, so the simulation is now pre-warmed for 130 frames before the first visible one: the audience meets a field already full of drifting wind, in the manner of the resting-field study. The pinch gust was too subtle and failed when the hand stood far from the camera; pinch distance is now measured relative to palm length rather than in absolute units, and both hands are tracked simultaneously. An early revision announced each burst with an expanding ring, but the overlay graphic broke the visual language of the piece; the ring was removed and the pinch now launches a travelling wind source instead, which sweeps across the canvas for about a second in the direction of the hand's movement, combing the particles into the long feathered streaks of the print renders. Everything visible remains pure particle motion. Finally, a small preview window now shows the webcam image with the detected hand skeleton drawn over it, so viewers understand at once that the camera sees them.</p>
+    </div></div>
+  </div>
+  <div class="steps" style="margin-top:0">
+    <div class="step"><div>
+      <h3>The series — one engine, many materials</h3>
+      <p>Once the first movement was stable, the question changed from "how does wind look" to "what else can this wind touch". Four further movements were prototyped by re-tuning the same engine rather than writing new ones: Silk raises particle alignment and cuts the Gaussian scatter to a tenth, so the field organises into threads, dyed rose and lavender by a second noise field after an early all-white version proved too faint to read; Grass anchors each particle to a root and converts pushes into bending, so nothing can leave; Smoke renders only accumulated density with relief shading, after an earlier stroke-based fog read as wisps rather than volume and was retired; Ocean Wave layers a broad swell beneath a fine chop and blooms foam where speed and turbulence coincide, so the material stays restless even with no one present. Each study was first proven in the offline renderer before interactive development, the same order of work as the poster renders.</p>
+    </div></div>
+    <div class="step"><div>
+      <h3>The full field — and a truer name</h3>
+      <p>Two revisions came from looking rather than coding. First, the opening page originally offered only the first movement; the hero now carries a mode bar that switches the live field between all four materials, each with its own physics and palette, so the series can be compared by hand within seconds. Second, the first movement was renamed. It had been called Gaussian Splatter after its mechanism, but the renders never looked like splatter; they looked like feathers drawn through light, and the work now carries the name of what it resembles rather than how it is made: Feather, 触羽. Finally, the three newer movements each received a full installation version with two-hand camera tracking and a sound voice designed for the material, all synthesised live with no recordings: filtered noise becomes a fire's roar, a dry rustle or a surf wash, and each material keeps a resting sound for the calm, from cricket song in the meadow to the slow breathing of the tide. In these versions the camera preview window was deliberately omitted, so the artwork remains the only image on screen.</p>
+    </div></div>
+  </div>
+  <div class="steps" style="margin-top:0">
+    <div class="step"><div>
+      <h3>The full-frame revision — fire and the breathing water</h3>
+      <p>A later round of looking changed three movements and one rule. Silk, whose threads kept thinning toward the edges, was reborn as Fire: the same engine given an updraft, a hot palette and a recycling rule that returns every escaped ember to the base, after the crimson GPU-particle experiments of the TouchDesigner scene. Smoke was set aside for a breathing volume that grows and collapses on its own cycle, so the interaction happens inside a living mass rather than beside a rising column. The early choppy sea was recast as a cold fluid in blue, cyan and pale violet, with a storm gust on the pinch. The shared rule that emerged: the material must cover the whole frame at rest and must never be emptied by interaction, since recycling, breathing or a centre pull always brings it back. The grass also learned manners: its response radius was cut to a half, so a passing hand bows a path, not the whole meadow.</p>
+    </div></div>
+  </div>
+  <div class="steps" style="margin-top:0">
+    <div class="step"><div>
+      <h3>The consolidation — the breathing sea becomes Wave</h3>
+      <p>The last revision was a subtraction. The powder engine built for the sea, a breathing mass of one-pixel grains, made a better single movement than the two water pieces it grew from, and its surge-and-break cycle plainly belonged to water. The choppy sea and the earlier volume were retired into it, the movement took the name it had always resembled, 浪, Wave, and the series settled at four movements: feather, fire, grass and wave. The powder was refined for the role: finer grains, a looser spring and a slow broad current so the whole body drifts and billows like a swell, and the sound traded its old wash for a breathing tide that inhales and exhales with the mass.</p>
+    </div></div>
+  </div>
+  <p class="body-text">Lessons that carried through every version: change one number at a time; every visual parameter is also an emotional parameter; the best behaviour of the system, the rebellious outlier particles, was originally a bug that was kept; and an interactive work is not finished until strangers have tried to break it.</p>
+</section>
+
+<!-- ================= FOOTER ================= -->
+<footer>
+  <div class="sig">Liu Tianren — Touch Wind, a series in four movements, 2026</div>
+  <div>p5.js · Web Audio · MediaPipe Hands · Gaussian distribution · Perlin noise<br>
+  All four movements are playable in the field at the top of this page. Best experienced full screen.</div>
+</footer>
+
+<script>
+/* Live hero: all four movements of the series, playable side by side.
+   The mode bar switches material; the engine (particles + Perlin
+   current + Gaussian touch) never changes, only its tuning. */
+let MODE = 'feather';
+const CFG = {
+  feather: { bg: [6, 8, 15],   fade: 10, N: 4200 },
+  fire:    { bg: [5, 2, 2],    fade: 13, N: 3200 },
+  grass:   { bg: [7, 14, 9],   fade: 90, N: 3400 },
+  cloud:   { bg: [5, 9, 18],   fade: 7,  N: 2600 },
+  wave:    { bg: [3, 6, 14],   fade: 16, N: 4600 }
+};
+let particles = [], winds = [], mousePrev;
+
+class P {
+  constructor() {
+    this.pos = createVector(random(width), random(height));
+    this.home = this.pos.copy();
+    this.vel = p5.Vector.random2D().mult(0.5);
+    this.size = constrain(abs(randomGaussian(1.2, 0.9)), 0.4, 4.5);
+    this.hue = random();
+    this.life = 160 + random(220);      // flame tongues live and die
+    this.age = random(this.life);
+    this.th = random(TWO_PI);           // polar home for the cloud
+    this.rr = pow(random(), 0.62);      // dense core, thinning rim
+  }
+  push(k, sigma, spread) {          // directional Gaussian wind
+    for (const w of winds) {
+      if (w.vel.mag() > 0.5) {
+        const d = dist(this.pos.x, this.pos.y, w.pos.x, w.pos.y);
+        const s = exp(-(d * d) / (2 * sigma * sigma));
+        if (s > 0.01) {
+          const f = w.vel.copy().mult(k * s);
+          f.rotate(randomGaussian(0, spread));
+          f.mult(abs(randomGaussian(1, 0.5)));
+          this.vel.add(f);
+        }
+      }
+    }
+  }
+  part(k, sigma) {                  // radial push: the hand parts the matter
+    for (const w of winds) {
+      if (w.vel.mag() > 0.5) {
+        const d = dist(this.pos.x, this.pos.y, w.pos.x, w.pos.y);
+        const s = exp(-(d * d) / (2 * sigma * sigma));
+        if (s > 0.02) {
+          const away = p5.Vector.sub(this.pos, w.pos).normalize();
+          this.vel.add(away.mult(k * s * min(w.vel.mag() * 0.12, 2.2)));
+        }
+      }
+    }
+  }
+  update() {
+    if (MODE === 'feather') {
+      const a = noise(this.pos.x * 0.0016, this.pos.y * 0.0016, frameCount * 0.0025) * TWO_PI * 2;
+      this.vel.add(cos(a) * 0.032, sin(a) * 0.032);
+      this.push(0.28, 45, 0.45);
+      this.vel.mult(0.955); this.vel.limit(12);
+    } else if (MODE === 'fire') {
+      /* flame anatomy: every tongue is born at the burning bed, rises
+         on its own heat, cools, dies and is reborn below — the fire
+         is a fountain, not a texture */
+      this.age++;
+      if (this.age > this.life || this.pos.y < -12) {
+        this.pos.set(random(width), height + random(60));
+        this.vel.set(randomGaussian(0, 0.4), -2.2 - random(2.2));
+        this.age = 0; this.life = 160 + random(220);
+      }
+      const eh = 1 - this.age / this.life;             // remaining heat
+      const a = noise(this.pos.x * 0.003, this.pos.y * 0.003, frameCount * 0.006) * TWO_PI * 2;
+      this.vel.add(cos(a) * 0.12, sin(a) * 0.05 - 0.20 * eh);
+      this.push(0.26, 40, 0.5);
+      this.vel.mult(0.92); this.vel.limit(10);
+      /* fire only ever rises: no tongue may travel downward */
+      if (this.vel.y > 0.35) this.vel.y = 0.35;
+    } else if (MODE === 'grass') {
+      const disp = p5.Vector.sub(this.pos, this.home);
+      this.vel.add(disp.mult(-0.035));            // spring back to the root
+      const a = noise(this.home.x * 0.002, this.home.y * 0.002, frameCount * 0.005) * TWO_PI;
+      this.vel.add(cos(a) * 0.14, sin(a) * 0.04); // ambient sway
+      /* a WIND WAKE, not a rolling ball: influence is a stripe
+         stretched along the wind and narrow across it, and every
+         blade bends strictly downwind */
+      for (const w of winds) {
+        const wm = w.vel.mag();
+        if (wm < 0.5) continue;
+        const ux = w.vel.x / wm, uy = w.vel.y / wm;
+        const ddx = this.pos.x - w.pos.x, ddy = this.pos.y - w.pos.y;
+        const along = ddx * ux + ddy * uy;
+        const cross = -ddx * uy + ddy * ux;
+        const sW = exp(-(along * along) / (2 * 150 * 150)
+                       - (cross * cross) / (2 * 45 * 45));
+        if (sW > 0.01) {
+          const f = 0.16 * wm * sW * abs(randomGaussian(1, 0.25));
+          this.vel.add(ux * f, uy * f);
+        }
+      }
+      this.vel.mult(0.86); this.vel.limit(9);
+    } else if (MODE === 'cloud') {
+      /* polar plume engine: every grain lives on its own ray from a
+         dense core; plumes are lobes of angle-noise that grow and
+         collapse, and the whole mass breathes along its radii */
+      const lobe = 0.72 + 0.55 * noise(cos(this.th) * 1.6 + 40,
+                                       sin(this.th) * 1.6 + 40, frameCount * 0.004);
+      const breathR = 1 + 0.18 * sin(frameCount * 0.011);
+      const Rm = 0.62 * min(width, height);
+      const rad = this.rr * Rm * lobe * breathR;
+      const hx = width / 2 + cos(this.th) * rad;
+      const hy = height / 2 + sin(this.th) * rad * 0.72;
+      this.vel.add((hx - this.pos.x) * 0.012, (hy - this.pos.y) * 0.012);
+      this.th += 0.00045;
+      const a = noise(this.pos.x * 0.003, this.pos.y * 0.003, frameCount * 0.005) * TWO_PI * 2;
+      this.vel.add(cos(a) * 0.28, sin(a) * 0.28);
+      this.part(2.6, 45);
+      this.vel.mult(0.92); this.vel.limit(7);
+    } else if (MODE === 'wave') {
+      /* breathing volumetric sea: the whole mass inhales and exhales
+         about the centre; fine turbulence combs it into fur strands */
+      const br = 1 + 0.16 * sin(frameCount * 0.011);
+      const hx = width / 2 + (this.home.x - width / 2) * br;
+      const hy = height / 2 + (this.home.y - height / 2) * br;
+      this.vel.add((hx - this.pos.x) * 0.012, (hy - this.pos.y) * 0.012);
+      const a = noise(this.pos.x * 0.004, this.pos.y * 0.004, frameCount * 0.008) * TWO_PI * 2;
+      this.vel.add(cos(a) * 0.22, sin(a) * 0.22);
+      this.push(0.30, 85, 0.3);
+      this.vel.mult(0.90); this.vel.limit(9);
+    }
+    this.pos.add(this.vel);
+    if (MODE !== 'grass' && MODE !== 'cloud') {
+      if (this.pos.x < -10) this.pos.x = width + 10;
+      if (this.pos.x > width + 10) this.pos.x = -10;
+      if (this.pos.y < -10) this.pos.y = height + 10;
+      if (this.pos.y > height + 10) this.pos.y = -10;
+    }
+  }
+  show() {
+    const sp = this.vel.mag();
+    if (MODE === 'feather') {
+      const t = constrain(sp / 5, 0, 1);
+      stroke(lerp(130, 255, t), lerp(168, 235, t), lerp(240, 215, t), lerp(140, 250, t));
+      strokeWeight(this.size * (0.8 + t));
+      point(this.pos.x, this.pos.y);
+    } else if (MODE === 'fire') {
+      /* crimson tendrils: bright orange-white while young and hot,
+         darkening to deep red as the tongue cools and dies */
+      const eh = constrain(1 - this.age / this.life, 0, 1);
+      const t = constrain(sp / 6, 0, 1);
+      const g = constrain(0.22 + 0.68 * eh + 0.30 * t, 0, 1);
+      stroke(120 + 135 * g, 15 + 205 * g * g, 5 + 70 * g * g * g, 45 + 195 * eh);
+      strokeWeight(this.size * 0.7);
+      line(this.pos.x - this.vel.x * 1.6, this.pos.y - this.vel.y * 1.6,
+           this.pos.x, this.pos.y);
+    } else if (MODE === 'grass') {
+      /* vivid pop palette: bright greens + scattered golden blades */
+      const bendx = (this.pos.x - this.home.x), bendy = (this.pos.y - this.home.y);
+      const g = 0.5 + 0.5 * this.hue;
+      const glow = constrain(sp / 4, 0, 1);
+      if (this.hue > 0.90) stroke(255, 214, 80, 245);
+      else stroke(70 + 105 * g + 85 * glow, 180 + 70 * g + 40 * glow, 60 + 42 * g, 245);
+      strokeWeight(2.2);
+      line(this.home.x, this.home.y,
+           this.home.x + bendx * 1.8, this.home.y - 9 - 7 * this.size + bendy * 1.4);
+    } else if (MODE === 'cloud') {
+      /* icy blue volume, soft-edged */
+      const t = constrain(sp / 4, 0, 1);
+      const h = noise(this.pos.x * 0.0012, this.pos.y * 0.0012);
+      stroke(115 + 65 * h + 45 * t, 165 + 55 * h + 35 * t, 225 + 25 * h, 10 + 16 * t);
+      strokeWeight(7 + 6 * this.size);
+      point(this.pos.x, this.pos.y);
+    } else if (MODE === 'wave') {
+      /* plush fur strands: turquoise crests, violet crevices */
+      const t = constrain(sp / 5, 0, 1);
+      const h = noise(this.pos.x * 0.0016, this.pos.y * 0.0016 + 9);
+      stroke(lerp(96, 150, h) + 70 * t, lerp(215, 130, h) + 50 * t, lerp(235, 240, h), 75 + 150 * t);
+      strokeWeight(this.size * 0.8);
+      line(this.pos.x - this.vel.x * 1.8, this.pos.y - this.vel.y * 1.8,
+           this.pos.x, this.pos.y);
+    }
+  }
+}
+
+function veil() {
+  const c = CFG[MODE];
+  noStroke(); fill(c.bg[0], c.bg[1], c.bg[2], c.fade); rect(0, 0, width, height);
+}
+
+function switchMode(m) {
+  MODE = m;
+  const c = CFG[m];
+  particles = [];
+  for (let i = 0; i < c.N; i++) particles.push(new P());
+  background(c.bg[0], c.bg[1], c.bg[2]);
+  winds = [];
+  const warm = (m === 'fire' || m === 'wave') ? 150 : 90;        // slow-fade modes accumulate until full
+  for (let i = 0; i < warm; i++) {               // pre-warm: no black opening
+    veil();
+    for (const pt of particles) { pt.update(); pt.show(); }
+  }
+  document.querySelectorAll('.mode-btn').forEach(b =>
+    b.classList.toggle('on', b.dataset.mode === m));
+}
+
+function setup() {
+  const holder = document.getElementById('sketch-holder');
+  const c = createCanvas(holder.offsetWidth, holder.offsetHeight);
+  c.parent('sketch-holder');
+  mousePrev = createVector(width / 2, height / 2);
+  switchMode('feather');
+  document.querySelectorAll('.mode-btn').forEach(b =>
+    b.addEventListener('click', () => switchMode(b.dataset.mode)));
+}
+
+function draw() {
+  veil();
+  winds = [];
+  const inHero = mouseY >= 0 && mouseY <= height && window.scrollY < height;
+  const m = createVector(mouseX, mouseY);
+  if (inHero) winds.push({ pos: m.copy(), vel: p5.Vector.sub(m, mousePrev) });
+  mousePrev = m;
+  for (const pt of particles) { pt.update(); pt.show(); }
+}
+
+function mousePressed() {
+  if (window.scrollY > height * 0.5) return;
+  if (mouseY < 0 || mouseY > height - 110) return;   // ignore clicks on the bar
+  for (const pt of particles) {
+    const d = dist(pt.pos.x, pt.pos.y, mouseX, mouseY);
+    if (d < 280) {
+      const dir = p5.Vector.sub(pt.pos, createVector(mouseX, mouseY)).normalize();
+      dir.rotate(randomGaussian(0, 0.3));
+      pt.vel.add(dir.mult(abs(randomGaussian(9, 4)) * exp(-d / 190)));
+    }
+  }
+}
+
+function windowResized() {
+  const holder = document.getElementById('sketch-holder');
+  resizeCanvas(holder.offsetWidth, holder.offsetHeight);
+  switchMode(MODE);
+}
+</script>
+</body>
+</html>
